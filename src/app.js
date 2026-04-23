@@ -108,19 +108,26 @@ try {
   console.warn('⚠️  Cartoon processors not initialised:', err.message);
 }
 
-// ===== Optional: run migrations on startup (Railway) =====
-if (process.env.RUN_MIGRATIONS_ON_STARTUP === 'true' && process.env.DATABASE_URL) {
-  runMigrations({ silent: false }).catch((err) => {
-    console.error('❌ Startup migrations failed:', err.message);
-  });
-}
-
-// ===== Optional: seed styles + music tracks when requested =====
-if (process.env.RUN_SEED_ON_STARTUP === 'true' && process.env.DATABASE_URL) {
-  require('./db/seed').main().catch((err) => {
-    console.error('❌ Startup seed failed:', err.message);
-  });
-}
+// ===== Optional: run migrations + seed on startup (Railway) =====
+// Seeding must wait for migrations to finish, otherwise it hits a db where
+// the tables don't exist yet.
+(async () => {
+  if (process.env.RUN_MIGRATIONS_ON_STARTUP === 'true' && process.env.DATABASE_URL) {
+    try {
+      await runMigrations({ silent: false });
+    } catch (err) {
+      console.error('❌ Startup migrations failed:', err.message);
+      return;
+    }
+  }
+  if (process.env.RUN_SEED_ON_STARTUP === 'true' && process.env.DATABASE_URL) {
+    try {
+      await require('./db/seed').main();
+    } catch (err) {
+      console.error('❌ Startup seed failed:', err.message);
+    }
+  }
+})();
 
 // ===== Ensure Required Directories =====
 async function ensureDirectories() {
