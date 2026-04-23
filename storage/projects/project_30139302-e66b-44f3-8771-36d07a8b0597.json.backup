@@ -1,0 +1,165 @@
+{
+  "id": "project_30139302-e66b-44f3-8771-36d07a8b0597",
+  "jobId": "2",
+  "title": "The Rise and Fall of Ancient Rome",
+  "context": "Focus on the economic and political factors that led to both the rise and eventual collapse of the Roman Empire. Highlight key figures like Julius Caesar and Augustus.",
+  "status": "processing",
+  "steps": {
+    "script": {
+      "status": "completed",
+      "jobId": "4"
+    },
+    "voice": {
+      "status": "processing",
+      "jobId": "4"
+    },
+    "images": {
+      "status": "pending",
+      "jobId": null
+    },
+    "video": {
+      "status": "pending",
+      "jobId": null
+    }
+  },
+  "createdAt": "2025-10-24T21:52:26.760Z",
+  "updatedAt": "2025-10-24T21:52:31.938Z",
+  "script": "Ever wonder how one city conquered the entire Mediterranean world? Rome didn't just stumble into power. It was built on military genius, political cunning, and smart economic decisions.\n\n---\n\nLet's start with Julius Caesar. This guy understood something crucial: you need money to win wars, and you need wars to get territory. Caesar's military campaigns in Gaul brought Rome massive wealth and resources. But here's the thing—he got too powerful. The Senate got nervous. So they killed him.\n\n---\n\nEnter Augustus. Caesar's adopted son learned from his uncle's mistakes. Instead of grabbing power directly, Augustus made himself seem indispensable. He controlled the military, the money, and the people loved him. Rome prospered. The economy boomed. Trade routes expanded across three continents.\n\n---\n\nBut success breeds complication. As Rome grew, so did its problems. The empire became too big to defend. Corruption spread through the government. Taxes got crushing. Citizens stopped caring about Rome's future.\n\n---\n\nAnd then came the final blow. The military, once Rome's greatest strength, became its weakness. Soldiers demanded payment Rome couldn't afford. The economy collapsed. Barbarian invasions weren't Rome's real enemy—Rome had already defeated itself from within.",
+  "sentences": [
+    {
+      "text": "Ever wonder how one city conquered the entire Mediterranean world?",
+      "index": 0,
+      "words": 10
+    },
+    {
+      "text": "Rome didn't just stumble into power.",
+      "index": 1,
+      "words": 6
+    },
+    {
+      "text": "It was built on military genius, political cunning, and smart economic decisions.",
+      "index": 2,
+      "words": 12
+    },
+    {
+      "text": "---\n\nLet's start with Julius Caesar.",
+      "index": 3,
+      "words": 6
+    },
+    {
+      "text": "This guy understood something crucial: you need money to win wars, and you need wars to get territory.",
+      "index": 4,
+      "words": 18
+    },
+    {
+      "text": "Caesar's military campaigns in Gaul brought Rome massive wealth and resources.",
+      "index": 5,
+      "words": 11
+    },
+    {
+      "text": "But here's the thing—he got too powerful.",
+      "index": 6,
+      "words": 7
+    },
+    {
+      "text": "The Senate got nervous.",
+      "index": 7,
+      "words": 4
+    },
+    {
+      "text": "So they killed him.",
+      "index": 8,
+      "words": 4
+    },
+    {
+      "text": "---\n\nEnter Augustus.",
+      "index": 9,
+      "words": 3
+    },
+    {
+      "text": "Caesar's adopted son learned from his uncle's mistakes.",
+      "index": 10,
+      "words": 8
+    },
+    {
+      "text": "Instead of grabbing power directly, Augustus made himself seem indispensable.",
+      "index": 11,
+      "words": 10
+    },
+    {
+      "text": "He controlled the military, the money, and the people loved him.",
+      "index": 12,
+      "words": 11
+    },
+    {
+      "text": "Rome prospered.",
+      "index": 13,
+      "words": 2
+    },
+    {
+      "text": "The economy boomed.",
+      "index": 14,
+      "words": 3
+    },
+    {
+      "text": "Trade routes expanded across three continents.",
+      "index": 15,
+      "words": 6
+    },
+    {
+      "text": "---\n\nBut success breeds complication.",
+      "index": 16,
+      "words": 5
+    },
+    {
+      "text": "As Rome grew, so did its problems.",
+      "index": 17,
+      "words": 7
+    },
+    {
+      "text": "The empire became too big to defend.",
+      "index": 18,
+      "words": 7
+    },
+    {
+      "text": "Corruption spread through the government.",
+      "index": 19,
+      "words": 5
+    },
+    {
+      "text": "Taxes got crushing.",
+      "index": 20,
+      "words": 3
+    },
+    {
+      "text": "Citizens stopped caring about Rome's future.",
+      "index": 21,
+      "words": 6
+    },
+    {
+      "text": "---\n\nAnd then came the final blow.",
+      "index": 22,
+      "words": 7
+    },
+    {
+      "text": "The military, once Rome's greatest strength, became its weakness.",
+      "index": 23,
+      "words": 9
+    },
+    {
+      "text": "Soldiers demanded payment Rome couldn't afford.",
+      "index": 24,
+      "words": 6
+    },
+    {
+      "text": "The economy collapsed.",
+      "index": 25,
+      "words": 3
+    },
+    {
+      "text": "Barbarian invasions weren't Rome's real enemy—Rome had already defeated itself from within.",
+      "index": 26,
+      "words": 12
+    }
+  ]
+}

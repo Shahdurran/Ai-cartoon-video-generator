@@ -1,0 +1,77 @@
+# Dependencies
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Python virtual environment
+whisper-venv/
+venv/
+env/
+.env/
+.venv/
+__pycache__/
+*.pyc
+
+# Build output
+dist/
+build/
+out/
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+test-output/
+
+# Output directories
+output/
+video-bank/*.mp4
+video-bank/*.mov
+video-bank/*.avi
+video-bank/*.mkv
+video-bank/*.webm
+
+# Thumbnails (can be regenerated)
+public/thumbnails/*.jpg
+public/thumbnails/*.png
+
+# Storage (keep structure, ignore data files)
+storage/channels/*.json
+storage/templates/*.json
+storage/projects/*.json
+storage/batches/*.json
+# Keep example files
+!storage/channels/example-channel.json
+!storage/templates/example-template.json
+!storage/projects/example-project.json
+!storage/batches/example-batch.json
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Local Redis image tarball (large; not needed in repo)
+redis-alpine.tar
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# PM2
+.pm2/
+ecosystem.config.js.backup 

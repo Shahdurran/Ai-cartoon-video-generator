@@ -1,0 +1,208 @@
+stages:
+  - test
+  - deploy
+
+variables:
+  NODE_VERSION: "18"
+
+# Test stage (optional but recommended)
+test:
+  stage: test
+  image: node:18
+  script:
+    - npm install --production
+    - npm test
+  only:
+    - merge_requests
+    - main
+  allow_failure: true  # Allow deployment even if tests fail (optional)
+
+# Deploy to production
+deploy_production:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client git
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - echo "Connecting to server IP:" $SERVER_IP
+    - echo "Using server user:" $SERVER_USER
+    - ssh-keyscan -H -T 10 $SERVER_IP >> ~/.ssh/known_hosts 2>/dev/null || echo "ssh-keyscan failed, using alternative method"
+    - |
+      if [ ! -s ~/.ssh/known_hosts ]; then
+        echo "Host key scan failed, configuring SSH to skip host verification"
+        cat > ~/.ssh/config << EOF
+        Host $SERVER_IP
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+        EOF
+        chmod 600 ~/.ssh/config
+      fi
+    - ssh -o ConnectTimeout=10 -o BatchMode=yes $SERVER_USER@$SERVER_IP "echo 'SSH connection successful'" || (echo "SSH connection failed - check server IP, user, and SSH key" && exit 1)
+  script:
+    - |
+      ssh -o ConnectTimeout=30 $SERVER_USER@$SERVER_IP << 'EOF'
+      set -e
+      echo "🚀 Starting deployment..."
+      
+      # Navigate to app directory
+      cd /opt/video-generator
+      
+      # Stop the application gracefully
+      echo "🛑 Stopping application..."
+      pm2 stop video-generator || echo "⚠️  Application was not running"
+      
+      # Backup current version
+      if [ -d "app" ]; then
+        echo "💾 Creating backup..."
+        rm -rf app_backup 2>/dev/null || true
+        cp -r app app_backup 2>/dev/null || true
+      fi
+      
+      # Clone/pull latest code
+      if [ ! -d "app/.git" ]; then
+        echo "📥 Cloning repository..."
+        git clone ${CI_REPOSITORY_URL} app || git clone ${CI_PROJECT_URL}.git app
+      else
+        echo "📥 Updating repository..."
+        cd app
+        git fetch origin
+        git reset --hard origin/${CI_COMMIT_REF_NAME:-main}
+        cd ..
+      fi
+      
+      cd app
+      
+      # Install Node.js dependencies
+      echo "📦 Installing Node.js dependencies..."
+      npm install --production --no-audit --no-fund
+      
+      # Verify critical system dependencies
+      echo "🔍 Verifying system dependencies..."
+      
+      # Check FFmpeg
+      if ! command -v ffmpeg &> /dev/null; then
+        echo "❌ FFmpeg not found, installing..."
+        sudo apt update && sudo apt install -y ffmpeg libavcodec-extra
+      else
+        echo "✅ FFmpeg available: $(ffmpeg -version 2>&1 | head -n1 | cut -d' ' -f3)"
+      fi
+      
+      # Check Python environment
+      if [ ! -f "/opt/whisper-env/bin/python" ]; then
+        echo "❌ Whisper environment not found, recreating..."
+        
+        # Install system dependencies if needed
+        sudo apt update
+        sudo apt install -y python3 python3-pip python3-venv python3-dev build-essential pkg-config
+        
+        # Remove old environment and create new one
+        sudo rm -rf /opt/whisper-env 2>/dev/null || true
+        sudo python3 -m venv /opt/whisper-env
+        sudo chown -R $(whoami):$(whoami) /opt/whisper-env
+        
+        # Install Python packages
+        source /opt/whisper-env/bin/activate
+        pip install --upgrade pip setuptools wheel
+        pip install faster-whisper openai-whisper numpy scipy librosa soundfile
+        
+        # Test installations
+        python -c "from faster_whisper import WhisperModel; print('✅ faster-whisper working')" || echo "❌ faster-whisper failed"
+        python -c "import whisper; print('✅ openai-whisper working')" || echo "❌ openai-whisper failed"
+        
+        # Pre-download essential models
+        echo "📥 Pre-downloading Whisper models..."
+        python -c "
+        try:
+            from faster_whisper import WhisperModel
+            WhisperModel('tiny'); WhisperModel('base')
+            print('✅ faster-whisper models ready')
+        except Exception as e:
+            print(f'⚠️  faster-whisper models: {e}')
+        
+        try:
+            import whisper
+            whisper.load_model('tiny'); whisper.load_model('base')
+            print('✅ openai-whisper models ready')
+        except Exception as e:
+            print(f'⚠️  openai-whisper models: {e}')
+        "
+        deactivate
+        
+        # Create symbolic link
+        sudo ln -sf /opt/whisper-env/bin/python /usr/local/bin/whisper-python
+      else
+        echo "✅ Whisper environment available"
+        # Quick test
+        source /opt/whisper-env/bin/activate
+        python -c "from faster_whisper import WhisperModel; print('✅ Whisper ready')" 2>/dev/null || echo "⚠️  Whisper may need reinstall"
+        deactivate
+      fi
+      
+      # Create/update PM2 ecosystem file
+      cat > ecosystem.config.js << 'EOFPM2'
+      module.exports = {
+        apps: [{
+          name: 'video-generator',
+          script: 'server.js',
+          instances: 1,
+          exec_mode: 'fork',
+          env: {
+            NODE_ENV: 'production',
+            PORT: 3000,
+            PATH: '/opt/whisper-env/bin:' + process.env.PATH,
+            PYTHONPATH: '/opt/whisper-env/lib/python*/site-packages',
+            PYTHON_PATH: '/opt/whisper-env/bin/python'
+          },
+          error_file: '/opt/video-generator/logs/err.log',
+          out_file: '/opt/video-generator/logs/out.log',
+          log_file: '/opt/video-generator/logs/combined.log',
+          time: true,
+          max_memory_restart: '4G',
+          node_args: '--max-old-space-size=4096',
+          kill_timeout: 60000,
+          restart_delay: 5000,
+          watch: false,
+          ignore_watch: ['node_modules', 'logs', 'public/videos', 'temp'],
+          max_restarts: 5,
+          min_uptime: '10s'
+        }]
+      };
+      EOFPM2
+      
+      # Ensure directories exist with proper permissions
+      echo "📁 Setting up directories..."
+      mkdir -p /opt/video-generator/{logs,public/videos,effects,test-output,temp}
+      chmod 755 /opt/video-generator/{public/videos,effects,test-output,temp,logs}
+      
+      # Start the application
+      echo "🚀 Starting application..."
+      pm2 start ecosystem.config.js --update-env
+      pm2 save
+      
+      # Wait a moment and check status
+      sleep 3
+      echo "📊 Application status:"
+      pm2 status
+      
+      # Show recent logs
+      echo "📋 Recent logs:"
+      pm2 logs video-generator --lines 10 --nostream || echo "No logs available yet"
+      
+      echo "✅ Deployment completed successfully!"
+      echo "🌐 Application should be available at http://$(curl -s ifconfig.me):3000"
+      EOF
+  environment:
+    name: production
+    url: http://$SERVER_IP:3000
+  only:
+    - main
+  when: manual
+  timeout: 20m  # Increase timeout for model downloads
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure

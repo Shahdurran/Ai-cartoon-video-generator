@@ -1,0 +1,43 @@
+{
+  "id": "example-template-001",
+  "name": "Quick News Update Template",
+  "description": "A template for creating quick news update videos",
+  "category": "news",
+  "settings": {
+    "videoDuration": "60-90",
+    "scriptStructure": {
+      "hook": true,
+      "introduction": true,
+      "mainPoints": 3,
+      "callToAction": true
+    },
+    "voiceSettings": {
+      "voice": "nova",
+      "speed": 1.1,
+      "provider": "genaipro"
+    },
+    "visualSettings": {
+      "imageStyle": "modern",
+      "numberOfImages": 3,
+      "transitions": "fade",
+      "useParticleEffect": true,
+      "particleOpacity": 0.2
+    },
+    "subtitleSettings": {
+      "enabled": true,
+      "fontFamily": "Roboto",
+      "fontSize": 28,
+      "fontColor": "#FFFFFF",
+      "backgroundColor": "#000000",
+      "backgroundOpacity": 0.7,
+      "position": "bottom"
+    }
+  },
+  "scriptPromptTemplate": "Create a {duration} second video script about {topic}. Make it {tone} and target {audience}. Include: {requirements}",
+  "imagePromptTemplate": "Create a {style} image showing {subject}. Style: photorealistic, high quality, {mood}",
+  "tags": ["news", "quick", "informative"],
+  "isPublic": true,
+  "createdAt": "2025-01-01T00:00:00.000Z",
+  "updatedAt": "2025-01-01T00:00:00.000Z"
+}
+

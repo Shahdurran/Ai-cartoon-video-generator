@@ -1,0 +1,74 @@
+{
+  "id": "example-batch-001",
+  "name": "Daily Tech News Batch",
+  "channelId": "example-channel-001",
+  "status": "completed",
+  "totalCount": 5,
+  "processedCount": 5,
+  "successCount": 4,
+  "failedCount": 1,
+  "videos": [
+    {
+      "id": "video-001",
+      "topic": "AI Breakthrough in Healthcare",
+      "status": "completed"
+    },
+    {
+      "id": "video-002",
+      "topic": "New Quantum Computing Chip",
+      "status": "completed"
+    },
+    {
+      "id": "video-003",
+      "topic": "SpaceX Mars Mission Update",
+      "status": "completed"
+    },
+    {
+      "id": "video-004",
+      "topic": "5G Network Expansion",
+      "status": "failed",
+      "error": "Image generation timeout"
+    },
+    {
+      "id": "video-005",
+      "topic": "Renewable Energy Advances",
+      "status": "completed"
+    }
+  ],
+  "results": [
+    {
+      "index": 0,
+      "videoId": "video-001",
+      "success": true,
+      "videoPath": "./public/videos/batch-001/video-001.mp4"
+    },
+    {
+      "index": 1,
+      "videoId": "video-002",
+      "success": true,
+      "videoPath": "./public/videos/batch-001/video-002.mp4"
+    },
+    {
+      "index": 2,
+      "videoId": "video-003",
+      "success": true,
+      "videoPath": "./public/videos/batch-001/video-003.mp4"
+    },
+    {
+      "index": 3,
+      "videoId": "video-004",
+      "success": false,
+      "error": "Image generation timeout"
+    },
+    {
+      "index": 4,
+      "videoId": "video-005",
+      "success": true,
+      "videoPath": "./public/videos/batch-001/video-005.mp4"
+    }
+  ],
+  "createdAt": "2025-01-15T00:00:00.000Z",
+  "updatedAt": "2025-01-15T02:30:00.000Z",
+  "completedAt": "2025-01-15T02:30:00.000Z"
+}
+

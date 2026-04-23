@@ -1,0 +1,32 @@
+{
+  "audioUrl": "https://www.soundjay.com/misc/sounds/bell-ringing-05.wav",
+  "videoId": "example-zoom-rotate-cycle",
+  "useDynamicImages": true,
+  "useSubtitles": true,
+  "useEffect": false,
+  "images": [
+    {
+      "section": "introduction",
+      "start_sentence": "Welcome to our presentation about the new zoom rotate cycle effect",
+      "end_sentence": "This effect creates a sophisticated animation with zoom and rotation",
+      "image_url": "https://picsum.photos/1792/1024?random=1",
+      "transition_type": "zoom_rotate_cycle"
+    },
+    {
+      "section": "comparison",
+      "start_sentence": "Now let's compare it with a regular zoom effect",
+      "end_sentence": "Notice how the zoom rotate cycle is more dynamic and engaging",
+      "image_url": "https://picsum.photos/1792/1024?random=2",
+      "transition_type": "zoom_in"
+    },
+    {
+      "section": "conclusion",
+      "start_sentence": "The zoom rotate cycle effect is perfect for product showcases",
+      "end_sentence": "It adds life to static images with smooth zoom and rotation",
+      "image_url": "https://picsum.photos/1792/1024?random=3",
+      "transition_type": "zoom_rotate_cycle"
+    }
+  ]
+}
+
+

@@ -1,0 +1,37 @@
+{
+  "audioUrl": "https://www.soundjay.com/misc/sounds/bell-ringing-05.wav",
+  "videoId": "relaxing-video-example",
+  "useDynamicImages": true,
+  "useSubtitles": true,
+  "useEffect": false,
+  "images": [
+    {
+      "section": "introduction",
+      "start_sentence": "Welcome to our relaxing presentation about nature",
+      "end_sentence": "Let's take a moment to appreciate the beauty around us",
+      "image_url": "https://picsum.photos/1792/1024?random=1",
+      "transition_type": "zoom_rotate_cycle"
+    },
+    {
+      "section": "nature",
+      "start_sentence": "The gentle movement of leaves in the wind",
+      "end_sentence": "Creates a peaceful atmosphere for meditation",
+      "image_url": "https://picsum.photos/1792/1024?random=2",
+      "transition_type": "zoom_in"
+    },
+    {
+      "section": "tranquility",
+      "start_sentence": "As we breathe deeply and relax",
+      "end_sentence": "We find inner peace and serenity",
+      "image_url": "https://picsum.photos/1792/1024?random=3",
+      "transition_type": "zoom_out"
+    },
+    {
+      "section": "conclusion",
+      "start_sentence": "Take this moment of calm with you",
+      "end_sentence": "And remember to find peace in everyday moments",
+      "image_url": "https://picsum.photos/1792/1024?random=4",
+      "transition_type": "zoom_rotate_cycle"
+    }
+  ]
+}

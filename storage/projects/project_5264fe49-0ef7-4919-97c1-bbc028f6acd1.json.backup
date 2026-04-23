@@ -1,0 +1,253 @@
+{
+  "id": "project_5264fe49-0ef7-4919-97c1-bbc028f6acd1",
+  "jobId": "4",
+  "title": "The Rise and Fall of Ancient Rome",
+  "context": "Focus on the economic and political factors that led to both the rise and eventual collapse of the Roman Empire. Highlight key figures like Julius Caesar and Augustus.",
+  "status": "processing",
+  "steps": {
+    "script": {
+      "status": "completed",
+      "jobId": "7"
+    },
+    "voice": {
+      "status": "completed",
+      "jobId": "7"
+    },
+    "images": {
+      "status": "completed",
+      "jobId": "3"
+    },
+    "video": {
+      "status": "processing",
+      "jobId": "3"
+    }
+  },
+  "createdAt": "2025-10-24T22:01:50.692Z",
+  "updatedAt": "2025-10-24T22:02:46.288Z",
+  "script": "Rome didn't just happen. It was built on strategy, ambition, and brutal economics.\n\n---\n\nPicture this: a small city-state in Italy, surrounded by enemies. But Rome had something different. They had discipline. They had roads. And they had a system that worked.\n\nJulius Caesar changed everything. He conquered Gaul, brought wealth flooding into Rome's coffers, and made himself a legend. But here's the thing—his ambition scared the Senate. So they killed him.\n\n---\n\nEnter Augustus. Caesar's heir learned from his uncle's mistakes. Instead of looking like a dictator, Augustus became the people's choice. He reformed the military, stabilized the economy, and promised peace. For the first time in generations, Rome wasn't tearing itself apart.\n\n---\n\nFor two hundred years, Rome thrived. Trade routes connected three continents. The empire was unstoppable.\n\nBut success breeds complacency. The military grew too expensive. Corruption spread through the government. Emperors started making terrible decisions.\n\n---\n\nBy the third century, Rome was bleeding money and soldiers. Invasions from the north. Plague from the east. The empire split in two, then crumbled.\n\nRome's fall wasn't sudden. It was death by a thousand cuts—economic collapse, political chaos, and the weight of trying to control too much.\n\nThe lesson? Even empires aren't forever.",
+  "sentences": [
+    {
+      "text": "Rome didn't just happen.",
+      "index": 0,
+      "words": 4
+    },
+    {
+      "text": "It was built on strategy, ambition, and brutal economics.",
+      "index": 1,
+      "words": 9
+    },
+    {
+      "text": "---\n\nPicture this: a small city-state in Italy, surrounded by enemies.",
+      "index": 2,
+      "words": 11
+    },
+    {
+      "text": "But Rome had something different.",
+      "index": 3,
+      "words": 5
+    },
+    {
+      "text": "They had discipline.",
+      "index": 4,
+      "words": 3
+    },
+    {
+      "text": "They had roads.",
+      "index": 5,
+      "words": 3
+    },
+    {
+      "text": "And they had a system that worked.",
+      "index": 6,
+      "words": 7
+    },
+    {
+      "text": "Julius Caesar changed everything.",
+      "index": 7,
+      "words": 4
+    },
+    {
+      "text": "He conquered Gaul, brought wealth flooding into Rome's coffers, and made himself a legend.",
+      "index": 8,
+      "words": 14
+    },
+    {
+      "text": "But here's the thing—his ambition scared the Senate.",
+      "index": 9,
+      "words": 8
+    },
+    {
+      "text": "So they killed him.",
+      "index": 10,
+      "words": 4
+    },
+    {
+      "text": "---\n\nEnter Augustus.",
+      "index": 11,
+      "words": 3
+    },
+    {
+      "text": "Caesar's heir learned from his uncle's mistakes.",
+      "index": 12,
+      "words": 7
+    },
+    {
+      "text": "Instead of looking like a dictator, Augustus became the people's choice.",
+      "index": 13,
+      "words": 11
+    },
+    {
+      "text": "He reformed the military, stabilized the economy, and promised peace.",
+      "index": 14,
+      "words": 10
+    },
+    {
+      "text": "For the first time in generations, Rome wasn't tearing itself apart.",
+      "index": 15,
+      "words": 11
+    },
+    {
+      "text": "---\n\nFor two hundred years, Rome thrived.",
+      "index": 16,
+      "words": 7
+    },
+    {
+      "text": "Trade routes connected three continents.",
+      "index": 17,
+      "words": 5
+    },
+    {
+      "text": "The empire was unstoppable.",
+      "index": 18,
+      "words": 4
+    },
+    {
+      "text": "But success breeds complacency.",
+      "index": 19,
+      "words": 4
+    },
+    {
+      "text": "The military grew too expensive.",
+      "index": 20,
+      "words": 5
+    },
+    {
+      "text": "Corruption spread through the government.",
+      "index": 21,
+      "words": 5
+    },
+    {
+      "text": "Emperors started making terrible decisions.",
+      "index": 22,
+      "words": 5
+    },
+    {
+      "text": "---\n\nBy the third century, Rome was bleeding money and soldiers.",
+      "index": 23,
+      "words": 11
+    },
+    {
+      "text": "Invasions from the north.",
+      "index": 24,
+      "words": 4
+    },
+    {
+      "text": "Plague from the east.",
+      "index": 25,
+      "words": 4
+    },
+    {
+      "text": "The empire split in two, then crumbled.",
+      "index": 26,
+      "words": 7
+    },
+    {
+      "text": "Rome's fall wasn't sudden.",
+      "index": 27,
+      "words": 4
+    },
+    {
+      "text": "It was death by a thousand cuts—economic collapse, political chaos, and the weight of trying to control too much.",
+      "index": 28,
+      "words": 19
+    },
+    {
+      "text": "The lesson?",
+      "index": 29,
+      "words": 2
+    },
+    {
+      "text": "Even empires aren't forever.",
+      "index": 30,
+      "words": 4
+    }
+  ],
+  "audioPath": "D:\\ffmpeg jim\\temp\\mock_voice_1761343316027.mp3",
+  "audioDuration": 82,
+  "images": [
+    {
+      "success": true,
+      "imagePath": "D:\\ffmpeg jim\\temp\\image_1761343320054_0.png",
+      "prompt": "Rome didn't just happen.. High quality, detailed, cinematic, historical, cinematic style",
+      "index": 0,
+      "metadata": {
+        "prompt": "Rome didn't just happen.. High quality, detailed, cinematic, historical, cinematic style",
+        "width": 1024,
+        "height": 576,
+        "model": "https://fal.run/fal-ai/flux/dev",
+        "seed": 937098576,
+        "aspectRatio": "16:9",
+        "quality": "standard",
+        "processingTime": 1907,
+        "generatedAt": "2025-10-24T22:02:00.055Z"
+      }
+    },
+    {
+      "success": true,
+      "imagePath": "D:\\ffmpeg jim\\temp\\image_1761343323451_1.png",
+      "prompt": "It was built on strategy, ambition, and brutal economics.. High quality, detailed, cinematic, historical, cinematic style",
+      "index": 1,
+      "metadata": {
+        "prompt": "It was built on strategy, ambition, and brutal economics.. High quality, detailed, cinematic, historical, cinematic style",
+        "width": 1024,
+        "height": 576,
+        "model": "https://fal.run/fal-ai/flux/dev",
+        "seed": 1403966313,
+        "aspectRatio": "16:9",
+        "quality": "standard",
+        "processingTime": 1359,
+        "generatedAt": "2025-10-24T22:02:03.452Z"
+      }
+    },
+    {
+      "success": true,
+      "imagePath": "D:\\ffmpeg jim\\temp\\image_1761343327382_2.png",
+      "prompt": "---\n\nPicture this: a small city-state in Italy, surrounded by enemies.. High quality, detailed, cinematic, historical, cinematic style",
+      "index": 2,
+      "metadata": {
+        "prompt": "---\n\nPicture this: a small city-state in Italy, surrounded by enemies.. High quality, detailed, cinematic, historical, cinematic style",
+        "width": 1024,
+        "height": 576,
+        "model": "https://fal.run/fal-ai/flux/dev",
+        "seed": 614396908,
+        "aspectRatio": "16:9",
+        "quality": "standard",
+        "processingTime": 1345,
+        "generatedAt": "2025-10-24T22:02:07.382Z"
+      }
+    }
+  ],
+  "videoPath": "D:\\ffmpeg jim\\output\\video_1761343327678.mp4",
+  "videoDuration": 82.050612,
+  "videoMetadata": {
+    "type": "TYPE_2",
+    "effectsUsed": {
+      "overlay": "old_camera",
+      "transitions": true,
+      "subtitles": true
+    },
+    "resolution": "1920x1080",
+    "fps": 30,
+    "processedAt": "2025-10-24T22:02:46.288Z"
+  }
+}

@@ -1,0 +1,190 @@
+{
+  "id": "project_eb09cd96-05ff-45c6-ab3a-fc657f48fd61",
+  "jobId": "2",
+  "title": "The Rise and Fall of Ancient Rome",
+  "context": "Focus on the economic and political factors that led to both the rise and eventual collapse of the Roman Empire. Highlight key figures like Julius Caesar and Augustus.",
+  "status": "processing",
+  "steps": {
+    "script": {
+      "status": "completed",
+      "jobId": "4"
+    },
+    "voice": {
+      "status": "processing",
+      "jobId": "4"
+    },
+    "images": {
+      "status": "pending",
+      "jobId": null
+    },
+    "video": {
+      "status": "pending",
+      "jobId": null
+    }
+  },
+  "createdAt": "2025-10-24T19:45:46.883Z",
+  "updatedAt": "2025-10-24T19:45:51.427Z",
+  "script": "Ever wonder how a small city became a superpower that ruled the world for nearly 500 years? Then collapsed in just a few decades?\n\nThat's the story of Rome.\n\n---\n\nIt all started with one man: Julius Caesar. In 49 BC, he seized power and transformed Rome from a republic into something new. But here's the thing—his ambition made enemies. His own senators stabbed him 23 times. Classic Rome.\n\n---\n\nThen came Augustus. Caesar's adopted heir. And this guy? He was different. Smart. He didn't grab power—he built it carefully. He reformed the military, stabilized the economy, and gave people what they wanted: peace and prosperity. Rome exploded. Trade routes expanded. The empire grew richer.\n\n---\n\nFor 200 years, Rome dominated. But success bred problems. The military became too expensive. Taxes crushed ordinary people. Corruption spread through the government like a virus.\n\n---\n\nThen inflation hit. The currency collapsed. Suddenly, soldiers couldn't afford to fight. Barbarians invaded from the north. Rome's borders crumbled.\n\n---\n\nBy 476 AD, it was over. The greatest empire in history fell—not from a single enemy, but from internal decay.\n\nThe lesson? Power without balance doesn't last.",
+  "sentences": [
+    {
+      "text": "Ever wonder how a small city became a superpower that ruled the world for nearly 500 years?",
+      "index": 0,
+      "words": 17
+    },
+    {
+      "text": "Then collapsed in just a few decades?",
+      "index": 1,
+      "words": 7
+    },
+    {
+      "text": "That's the story of Rome.",
+      "index": 2,
+      "words": 5
+    },
+    {
+      "text": "---\n\nIt all started with one man: Julius Caesar.",
+      "index": 3,
+      "words": 9
+    },
+    {
+      "text": "In 49 BC, he seized power and transformed Rome from a republic into something new.",
+      "index": 4,
+      "words": 15
+    },
+    {
+      "text": "But here's the thing—his ambition made enemies.",
+      "index": 5,
+      "words": 7
+    },
+    {
+      "text": "His own senators stabbed him 23 times.",
+      "index": 6,
+      "words": 7
+    },
+    {
+      "text": "Classic Rome.",
+      "index": 7,
+      "words": 2
+    },
+    {
+      "text": "---\n\nThen came Augustus.",
+      "index": 8,
+      "words": 4
+    },
+    {
+      "text": "Caesar's adopted heir.",
+      "index": 9,
+      "words": 3
+    },
+    {
+      "text": "And this guy?",
+      "index": 10,
+      "words": 3
+    },
+    {
+      "text": "He was different.",
+      "index": 11,
+      "words": 3
+    },
+    {
+      "text": "Smart.",
+      "index": 12,
+      "words": 1
+    },
+    {
+      "text": "He didn't grab power—he built it carefully.",
+      "index": 13,
+      "words": 7
+    },
+    {
+      "text": "He reformed the military, stabilized the economy, and gave people what they wanted: peace and prosperity.",
+      "index": 14,
+      "words": 16
+    },
+    {
+      "text": "Rome exploded.",
+      "index": 15,
+      "words": 2
+    },
+    {
+      "text": "Trade routes expanded.",
+      "index": 16,
+      "words": 3
+    },
+    {
+      "text": "The empire grew richer.",
+      "index": 17,
+      "words": 4
+    },
+    {
+      "text": "---\n\nFor 200 years, Rome dominated.",
+      "index": 18,
+      "words": 6
+    },
+    {
+      "text": "But success bred problems.",
+      "index": 19,
+      "words": 4
+    },
+    {
+      "text": "The military became too expensive.",
+      "index": 20,
+      "words": 5
+    },
+    {
+      "text": "Taxes crushed ordinary people.",
+      "index": 21,
+      "words": 4
+    },
+    {
+      "text": "Corruption spread through the government like a virus.",
+      "index": 22,
+      "words": 8
+    },
+    {
+      "text": "---\n\nThen inflation hit.",
+      "index": 23,
+      "words": 4
+    },
+    {
+      "text": "The currency collapsed.",
+      "index": 24,
+      "words": 3
+    },
+    {
+      "text": "Suddenly, soldiers couldn't afford to fight.",
+      "index": 25,
+      "words": 6
+    },
+    {
+      "text": "Barbarians invaded from the north.",
+      "index": 26,
+      "words": 5
+    },
+    {
+      "text": "Rome's borders crumbled.",
+      "index": 27,
+      "words": 3
+    },
+    {
+      "text": "---\n\nBy 476 AD, it was over.",
+      "index": 28,
+      "words": 7
+    },
+    {
+      "text": "The greatest empire in history fell—not from a single enemy, but from internal decay.",
+      "index": 29,
+      "words": 14
+    },
+    {
+      "text": "The lesson?",
+      "index": 30,
+      "words": 2
+    },
+    {
+      "text": "Power without balance doesn't last.",
+      "index": 31,
+      "words": 5
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "audioUrl": "https://www.soundjay.com/misc/sounds/bell-ringing-05.wav",
+  "videoId": "test-zoom-rotate-cycle",
+  "useDynamicImages": true,
+  "useSubtitles": false,
+  "useEffect": false,
+  "images": [
+    {
+      "section": "test_zoom_rotate",
+      "start_sentence": "Testing the new zoom rotate cycle effect",
+      "end_sentence": "This demonstrates the complex animation sequence",
+      "image_url": "https://picsum.photos/1792/1024?random=1",
+      "transition_type": "zoom_rotate_cycle"
+    },
+    {
+      "section": "comparison",
+      "start_sentence": "Now let's see a regular zoom effect",
+      "end_sentence": "Notice the difference in animation complexity",
+      "image_url": "https://picsum.photos/1792/1024?random=2",
+      "transition_type": "zoom_in"
+    },
+    {
+      "section": "final_test",
+      "start_sentence": "And finally, a static image for comparison",
+      "end_sentence": "This shows the baseline without animation",
+      "image_url": "https://picsum.photos/1792/1024?random=3",
+      "transition_type": "none"
+    }
+  ]
+}
+
+

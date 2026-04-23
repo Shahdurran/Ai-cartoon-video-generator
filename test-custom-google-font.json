@@ -1,0 +1,22 @@
+{
+  "audioUrl": "https://www.soundjay.com/misc/sounds/bell-ringing-05.wav",
+  "imageUrl": "https://picsum.photos/1536/1024",
+  "videoId": "custom-google-font-test",
+  "useSubtitles": true,
+  "useAssemblyAI": true,
+  "fontOptions": {
+    "fontFamily": "Dancing Script",
+    "fontSize": 28,
+    "fontColor": "&HFFD700",
+    "outlineColor": "&H000000",
+    "backgroundColor": "&H80000000",
+    "bold": 1,
+    "italic": 0,
+    "outline": 3,
+    "shadow": 2,
+    "alignment": 2,
+    "marginV": 40,
+    "marginL": 15,
+    "marginR": 15
+  }
+}

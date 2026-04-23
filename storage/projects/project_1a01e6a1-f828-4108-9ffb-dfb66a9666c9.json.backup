@@ -1,0 +1,265 @@
+{
+  "id": "project_1a01e6a1-f828-4108-9ffb-dfb66a9666c9",
+  "jobId": "3",
+  "title": "The Rise and Fall of Ancient Rome",
+  "context": "Focus on the economic and political factors that led to both the rise and eventual collapse of the Roman Empire. Highlight key figures like Julius Caesar and Augustus.",
+  "status": "processing",
+  "steps": {
+    "script": {
+      "status": "completed",
+      "jobId": "6"
+    },
+    "voice": {
+      "status": "completed",
+      "jobId": "6"
+    },
+    "images": {
+      "status": "completed",
+      "jobId": "2"
+    },
+    "video": {
+      "status": "processing",
+      "jobId": "2"
+    }
+  },
+  "createdAt": "2025-10-24T22:00:36.471Z",
+  "updatedAt": "2025-10-24T22:00:54.346Z",
+  "script": "# The Rise and Fall of Ancient Rome\n\nEver wonder how a single city conquered the entire known world? Rome didn't become an empire overnight. It took centuries of military genius, political strategy, and economic power.\n\n---\n\nIt all started with the Republic. Rome's early success came from a simple formula: strong military discipline and smart governance. But everything changed when Julius Caesar arrived. He was ambitious. Charismatic. Dangerous. Caesar expanded Rome's territory faster than anyone before him, conquering Gaul and becoming impossibly powerful. The Senate got nervous. Really nervous. So they forced him into civil war.\n\n---\n\nCaesar won. But his victory cost him his life. Senators stabbed him in 44 BC, terrified of his power. His death created chaos. Enter Augustus—Caesar's adopted heir. Augustus was different. He didn't just grab power. He reorganized it. He created a system that looked like the Republic but actually gave him total control. The people loved him. The economy boomed under his rule. Trade routes expanded. Cities grew. Rome seemed unstoppable.\n\n---\n\nFor two centuries, Rome thrived. But empires don't last forever. By the third century, cracks appeared everywhere. Inflation spiraled out of control. The military couldn't defend such a massive border. Corruption spread through government. Enemies attacked from all sides. The empire split in two, then collapsed. What rose so dramatically eventually fell just as hard.",
+  "sentences": [
+    {
+      "text": "# The Rise and Fall of Ancient Rome\n\nEver wonder how a single city conquered the entire known world?",
+      "index": 0,
+      "words": 19
+    },
+    {
+      "text": "Rome didn't become an empire overnight.",
+      "index": 1,
+      "words": 6
+    },
+    {
+      "text": "It took centuries of military genius, political strategy, and economic power.",
+      "index": 2,
+      "words": 11
+    },
+    {
+      "text": "---\n\nIt all started with the Republic.",
+      "index": 3,
+      "words": 7
+    },
+    {
+      "text": "Rome's early success came from a simple formula: strong military discipline and smart governance.",
+      "index": 4,
+      "words": 14
+    },
+    {
+      "text": "But everything changed when Julius Caesar arrived.",
+      "index": 5,
+      "words": 7
+    },
+    {
+      "text": "He was ambitious.",
+      "index": 6,
+      "words": 3
+    },
+    {
+      "text": "Charismatic.",
+      "index": 7,
+      "words": 1
+    },
+    {
+      "text": "Dangerous.",
+      "index": 8,
+      "words": 1
+    },
+    {
+      "text": "Caesar expanded Rome's territory faster than anyone before him, conquering Gaul and becoming impossibly powerful.",
+      "index": 9,
+      "words": 15
+    },
+    {
+      "text": "The Senate got nervous.",
+      "index": 10,
+      "words": 4
+    },
+    {
+      "text": "Really nervous.",
+      "index": 11,
+      "words": 2
+    },
+    {
+      "text": "So they forced him into civil war.",
+      "index": 12,
+      "words": 7
+    },
+    {
+      "text": "---\n\nCaesar won.",
+      "index": 13,
+      "words": 3
+    },
+    {
+      "text": "But his victory cost him his life.",
+      "index": 14,
+      "words": 7
+    },
+    {
+      "text": "Senators stabbed him in 44 BC, terrified of his power.",
+      "index": 15,
+      "words": 10
+    },
+    {
+      "text": "His death created chaos.",
+      "index": 16,
+      "words": 4
+    },
+    {
+      "text": "Enter Augustus—Caesar's adopted heir.",
+      "index": 17,
+      "words": 4
+    },
+    {
+      "text": "Augustus was different.",
+      "index": 18,
+      "words": 3
+    },
+    {
+      "text": "He didn't just grab power.",
+      "index": 19,
+      "words": 5
+    },
+    {
+      "text": "He reorganized it.",
+      "index": 20,
+      "words": 3
+    },
+    {
+      "text": "He created a system that looked like the Republic but actually gave him total control.",
+      "index": 21,
+      "words": 15
+    },
+    {
+      "text": "The people loved him.",
+      "index": 22,
+      "words": 4
+    },
+    {
+      "text": "The economy boomed under his rule.",
+      "index": 23,
+      "words": 6
+    },
+    {
+      "text": "Trade routes expanded.",
+      "index": 24,
+      "words": 3
+    },
+    {
+      "text": "Cities grew.",
+      "index": 25,
+      "words": 2
+    },
+    {
+      "text": "Rome seemed unstoppable.",
+      "index": 26,
+      "words": 3
+    },
+    {
+      "text": "---\n\nFor two centuries, Rome thrived.",
+      "index": 27,
+      "words": 6
+    },
+    {
+      "text": "But empires don't last forever.",
+      "index": 28,
+      "words": 5
+    },
+    {
+      "text": "By the third century, cracks appeared everywhere.",
+      "index": 29,
+      "words": 7
+    },
+    {
+      "text": "Inflation spiraled out of control.",
+      "index": 30,
+      "words": 5
+    },
+    {
+      "text": "The military couldn't defend such a massive border.",
+      "index": 31,
+      "words": 8
+    },
+    {
+      "text": "Corruption spread through government.",
+      "index": 32,
+      "words": 4
+    },
+    {
+      "text": "Enemies attacked from all sides.",
+      "index": 33,
+      "words": 5
+    },
+    {
+      "text": "The empire split in two, then collapsed.",
+      "index": 34,
+      "words": 7
+    },
+    {
+      "text": "What rose so dramatically eventually fell just as hard.",
+      "index": 35,
+      "words": 9
+    }
+  ],
+  "audioPath": "D:\\ffmpeg jim\\temp\\mock_voice_1761343242603.mp3",
+  "audioDuration": 90,
+  "images": [
+    {
+      "success": true,
+      "imagePath": "D:\\ffmpeg jim\\temp\\image_1761343246665_0.png",
+      "prompt": "# The Rise and Fall of Ancient Rome\n\nEver wonder how a single city conquered the entire known world?. High quality, detailed, cinematic, historical, cinematic style",
+      "index": 0,
+      "metadata": {
+        "prompt": "# The Rise and Fall of Ancient Rome\n\nEver wonder how a single city conquered the entire known world?. High quality, detailed, cinematic, historical, cinematic style",
+        "width": 1024,
+        "height": 576,
+        "model": "https://fal.run/fal-ai/flux/dev",
+        "seed": 1017528206,
+        "aspectRatio": "16:9",
+        "quality": "standard",
+        "processingTime": 1935,
+        "generatedAt": "2025-10-24T22:00:46.667Z"
+      }
+    },
+    {
+      "success": true,
+      "imagePath": "D:\\ffmpeg jim\\temp\\image_1761343250510_1.png",
+      "prompt": "Rome didn't become an empire overnight.. High quality, detailed, cinematic, historical, cinematic style",
+      "index": 1,
+      "metadata": {
+        "prompt": "Rome didn't become an empire overnight.. High quality, detailed, cinematic, historical, cinematic style",
+        "width": 1024,
+        "height": 576,
+        "model": "https://fal.run/fal-ai/flux/dev",
+        "seed": 819048092,
+        "aspectRatio": "16:9",
+        "quality": "standard",
+        "processingTime": 1312,
+        "generatedAt": "2025-10-24T22:00:50.511Z"
+      }
+    },
+    {
+      "success": true,
+      "imagePath": "D:\\ffmpeg jim\\temp\\image_1761343254332_2.png",
+      "prompt": "It took centuries of military genius, political strategy, and economic power.. High quality, detailed, cinematic, historical, cinematic style",
+      "index": 2,
+      "metadata": {
+        "prompt": "It took centuries of military genius, political strategy, and economic power.. High quality, detailed, cinematic, historical, cinematic style",
+        "width": 1024,
+        "height": 576,
+        "model": "https://fal.run/fal-ai/flux/dev",
+        "seed": 470810563,
+        "aspectRatio": "16:9",
+        "quality": "standard",
+        "processingTime": 1306,
+        "generatedAt": "2025-10-24T22:00:54.332Z"
+      }
+    }
+  ]
+}

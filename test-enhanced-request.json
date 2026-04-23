@@ -1,0 +1,16 @@
+{
+  "audioUrl": "https://www.soundjay.com/misc/sounds/bell-ringing-05.wav",
+  "imageUrl": "https://via.placeholder.com/1280x720/0066cc/ffffff?text=Test+Image",
+  "videoId": "test-enhanced-features",
+  "useAssemblyAI": true,
+  "fontOptions": {
+    "fontFamily": "Roboto",
+    "fontSize": 24,
+    "fontColor": "&HFFFFFF",
+    "outlineColor": "&H000000",
+    "bold": 1,
+    "outline": 3,
+    "alignment": 2,
+    "marginV": 50
+  }
+}

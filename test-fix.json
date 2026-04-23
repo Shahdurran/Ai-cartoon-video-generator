@@ -1,0 +1,10 @@
+{
+  "audioUrl": "https://www.soundjay.com/misc/sounds/bell-ringing-05.wav",
+  "imageUrl": "https://via.placeholder.com/1280x720/0066cc/ffffff?text=Test+Fix",
+  "videoId": "test-fix-123",
+  "useAssemblyAI": true,
+  "fontOptions": {
+    "fontFamily": "Arial",
+    "fontSize": 20
+  }
+}

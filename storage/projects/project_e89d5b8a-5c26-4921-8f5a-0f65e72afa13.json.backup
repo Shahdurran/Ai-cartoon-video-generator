@@ -1,0 +1,185 @@
+{
+  "id": "project_e89d5b8a-5c26-4921-8f5a-0f65e72afa13",
+  "jobId": "1",
+  "title": "The Rise and Fall of Ancient Rome",
+  "context": "Focus on the economic and political factors that led to both the rise and eventual collapse of the Roman Empire. Highlight key figures like Julius Caesar and Augustus.",
+  "status": "processing",
+  "steps": {
+    "script": {
+      "status": "completed",
+      "jobId": "3"
+    },
+    "voice": {
+      "status": "processing",
+      "jobId": "3"
+    },
+    "images": {
+      "status": "pending",
+      "jobId": null
+    },
+    "video": {
+      "status": "pending",
+      "jobId": null
+    }
+  },
+  "createdAt": "2025-10-24T21:52:01.110Z",
+  "updatedAt": "2025-10-24T21:52:06.681Z",
+  "script": "Ever wonder why Rome went from a small city-state to ruling the entire Mediterranean world? And then... just collapsed?\n\nThe answer lies in economics and power.\n\n---\n\nIt started with Julius Caesar. In 49 BC, he crossed the Rubicon River—literally breaking the law—and seized control. Why? Because Rome's economy was booming, and whoever controlled the military controlled everything. Caesar consolidated power through military conquest and political alliances. But here's the thing: his ambition made enemies. In 44 BC, senators stabbed him to death.\n\nEnter Augustus. Caesar's adopted heir learned from his uncle's mistakes. Instead of looking like a dictator, Augustus became Rome's first emperor while keeping the Senate intact. Smart move. He brought stability, reformed the military, and expanded trade routes. The economy flourished. Rome felt secure. For nearly two centuries, the empire thrived under strong leadership and economic growth.\n\n---\n\nBut success created complacency. Later emperors became corrupt. Military spending skyrocketed. Inflation crunched the economy. Taxes rose. People suffered. The military, once loyal, started caring more about money than duty.\n\nBy 476 AD, Rome couldn't hold it together anymore. The empire fractured. Barbarian invasions finished what economic collapse had started.\n\nRome's lesson? Power without wisdom, and wealth without purpose, eventually crumbles.",
+  "sentences": [
+    {
+      "text": "Ever wonder why Rome went from a small city-state to ruling the entire Mediterranean world?",
+      "index": 0,
+      "words": 15
+    },
+    {
+      "text": "And then...",
+      "index": 1,
+      "words": 2
+    },
+    {
+      "text": "just collapsed?",
+      "index": 2,
+      "words": 2
+    },
+    {
+      "text": "The answer lies in economics and power.",
+      "index": 3,
+      "words": 7
+    },
+    {
+      "text": "---\n\nIt started with Julius Caesar.",
+      "index": 4,
+      "words": 6
+    },
+    {
+      "text": "In 49 BC, he crossed the Rubicon River—literally breaking the law—and seized control.",
+      "index": 5,
+      "words": 13
+    },
+    {
+      "text": "Why?",
+      "index": 6,
+      "words": 1
+    },
+    {
+      "text": "Because Rome's economy was booming, and whoever controlled the military controlled everything.",
+      "index": 7,
+      "words": 12
+    },
+    {
+      "text": "Caesar consolidated power through military conquest and political alliances.",
+      "index": 8,
+      "words": 9
+    },
+    {
+      "text": "But here's the thing: his ambition made enemies.",
+      "index": 9,
+      "words": 8
+    },
+    {
+      "text": "In 44 BC, senators stabbed him to death.",
+      "index": 10,
+      "words": 8
+    },
+    {
+      "text": "Enter Augustus.",
+      "index": 11,
+      "words": 2
+    },
+    {
+      "text": "Caesar's adopted heir learned from his uncle's mistakes.",
+      "index": 12,
+      "words": 8
+    },
+    {
+      "text": "Instead of looking like a dictator, Augustus became Rome's first emperor while keeping the Senate intact.",
+      "index": 13,
+      "words": 16
+    },
+    {
+      "text": "Smart move.",
+      "index": 14,
+      "words": 2
+    },
+    {
+      "text": "He brought stability, reformed the military, and expanded trade routes.",
+      "index": 15,
+      "words": 10
+    },
+    {
+      "text": "The economy flourished.",
+      "index": 16,
+      "words": 3
+    },
+    {
+      "text": "Rome felt secure.",
+      "index": 17,
+      "words": 3
+    },
+    {
+      "text": "For nearly two centuries, the empire thrived under strong leadership and economic growth.",
+      "index": 18,
+      "words": 13
+    },
+    {
+      "text": "---\n\nBut success created complacency.",
+      "index": 19,
+      "words": 5
+    },
+    {
+      "text": "Later emperors became corrupt.",
+      "index": 20,
+      "words": 4
+    },
+    {
+      "text": "Military spending skyrocketed.",
+      "index": 21,
+      "words": 3
+    },
+    {
+      "text": "Inflation crunched the economy.",
+      "index": 22,
+      "words": 4
+    },
+    {
+      "text": "Taxes rose.",
+      "index": 23,
+      "words": 2
+    },
+    {
+      "text": "People suffered.",
+      "index": 24,
+      "words": 2
+    },
+    {
+      "text": "The military, once loyal, started caring more about money than duty.",
+      "index": 25,
+      "words": 11
+    },
+    {
+      "text": "By 476 AD, Rome couldn't hold it together anymore.",
+      "index": 26,
+      "words": 9
+    },
+    {
+      "text": "The empire fractured.",
+      "index": 27,
+      "words": 3
+    },
+    {
+      "text": "Barbarian invasions finished what economic collapse had started.",
+      "index": 28,
+      "words": 8
+    },
+    {
+      "text": "Rome's lesson?",
+      "index": 29,
+      "words": 2
+    },
+    {
+      "text": "Power without wisdom, and wealth without purpose, eventually crumbles.",
+      "index": 30,
+      "words": 9
+    }
+  ]
+}

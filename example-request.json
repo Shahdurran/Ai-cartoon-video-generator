@@ -1,0 +1,22 @@
+{
+  "audioUrl": "https://example.com/audio.mp3",
+  "imageUrl": "https://example.com/background.jpg",
+  "useParticleEffect": true,
+  "particleOpacity": 0.7,
+  "useAssemblyAI": true,
+  "fontOptions": {
+    "fontFamily": "Roboto",
+    "fontSize": 20,
+    "fontColor": "&HFFFFFF",
+    "outlineColor": "&H000000",
+    "backgroundColor": "&H80000000",
+    "bold": 1,
+    "italic": 0,
+    "outline": 2,
+    "shadow": 1,
+    "alignment": 2,
+    "marginV": 40,
+    "marginL": 20,
+    "marginR": 20
+  }
+}

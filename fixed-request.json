@@ -1,0 +1,129 @@
+{
+    "audioUrl": "https://drive.google.com/file/d/1B1xs_kw-34ehecvWaZNPhy-AfSAW0iDg/view?usp=drive_link",
+    "imageUrl": "",
+    "useEffect": "true",
+    "useDynamicImages": true,
+    "particleOpacity": "0.5",
+    "videoId": "55_new_2_fixed",
+    "useSubtitles": true,
+    "effectType": "old_camera",
+    "disable_movement_effects": false,
+    "introVideoUrl": "https://drive.google.com/file/d/100p40whNjfUFT9bKODwehVqNjOzMCi9W/view?usp=drive_link",
+    "visualLeadSeconds": -1,
+    "showFirstImageFromZero": true,
+    "images": [
+        {
+            "section": "Block 1",
+            "start_sentence": "The ring of hammer on metal echoed through the small forge at the edge of Meresford's marketplace.",
+            "end_sentence": "The memory still burned.",
+            "image_url": "https://drive.google.com/file/d/122Q-OvmDcGehcBzpvJwKurWbhY23PFix/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 2",
+            "start_sentence": "The memory still burned.",
+            "end_sentence": "The war had created a kinship of grief that Thaddeus recognized but refused to join.",
+            "image_url": "https://drive.google.com/file/d/1zheZG3_8NMMfuck-jkIJGsRebJOlDphZ/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 3",
+            "start_sentence": "The war had created a kinship of grief that Thaddeus recognized but refused to join.",
+            "end_sentence": "It now lay buried with her.",
+            "image_url": "https://drive.google.com/file/d/1AjGQt9taASQo9IWlpGzQQ7IQqZuqQENH/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 4",
+            "start_sentence": "It now lay buried with her.",
+            "end_sentence": "He had built walls around himself as sturdy as the stone forge that housed his work, and he intended to maintain them.",
+            "image_url": "https://drive.google.com/file/d/1D8GqHeXfUw5wtA_jXx3BMOfmabtjhzd-/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 5",
+            "start_sentence": "He had built walls around himself as sturdy as the stone forge that housed his work, and he intended to maintain them.",
+            "end_sentence": "Her legs don't work properly now, but the rest of me is quite functional.",
+            "image_url": "https://drive.google.com/file/d/1iEgXgCUxAs74a8VFNSEp2mQY_8c5noYQ/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 6",
+            "start_sentence": "Her legs don't work properly now, but the rest of me is quite functional.",
+            "end_sentence": "Neither of them noticed the elegant figure who paused outside the open door, watching their interaction with thoughtful eyes.",
+            "image_url": "https://drive.google.com/file/d/1FFsERzTnNdCOVrTohOSpk1OCedF197fc/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 7",
+            "start_sentence": "Neither of them noticed the elegant figure who paused outside the open door, watching their interaction with thoughtful eyes.",
+            "end_sentence": "But she would remember the smile on her daughter's face—and the gentle hands of the man who had caused it.",
+            "image_url": "https://drive.google.com/file/d/1qVV1nzfEBbXaUj1hjGnnGwoD317gntpn/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 8",
+            "start_sentence": "But she would remember the smile on her daughter's face—and the gentle hands of the man who had caused it.",
+            "end_sentence": "The girl proved an attentive student, asking thoughtful questions about materials and mechanics.",
+            "image_url": "https://drive.google.com/file/d/1_t9nh25JAxXPlTpXdBXz3taeuCVkNTDB/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 9",
+            "start_sentence": "The girl proved an attentive student, asking thoughtful questions about materials and mechanics.",
+            "end_sentence": "Her eyes met his, something unspoken passing between them.",
+            "image_url": "https://drive.google.com/file/d/1OaLDG-DexsQrlRVjyLJO5SEqo0QB0m15/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 10",
+            "start_sentence": "Her eyes met his, something unspoken passing between them.",
+            "end_sentence": "I suggest you consider your next words with great care.",
+            "image_url": "https://drive.google.com/file/d/1PYh8qWaUdiNQ30bFmKepwNccwuqHIUI4/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 11",
+            "start_sentence": "I suggest you consider your next words with great care.",
+            "end_sentence": "And Octavia, watching them both, felt something long frozen within her begin to thaw.",
+            "image_url": "https://drive.google.com/file/d/16aFFK8Y7-Wse_vVF9GdIAoVW11sSeRwZ/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 12",
+            "start_sentence": "And Octavia, watching them both, felt something long frozen within her begin to thaw.",
+            "end_sentence": "He says I should accept it and stop trying.",
+            "image_url": "https://drive.google.com/file/d/1YF86UknoALls5pe74kUYpjSiP1RxTo0M/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 13",
+            "start_sentence": "He says I should accept it and stop trying.",
+            "end_sentence": "I believe he did.",
+            "image_url": "https://drive.google.com/file/d/1IvrYf951PgKLIrZ3fBXUZ6aN-Xh5eGVe/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 14",
+            "start_sentence": "I believe he did.",
+            "end_sentence": "Will you serve this duchy once more, officially and with the honor you deserve?",
+            "image_url": "https://drive.google.com/file/d/16cc0CJ1uQUlKNErup9yzWhqkAr4EJq58/view?usp=drivesdk"
+        },
+        {
+            "section": "Block 15",
+            "start_sentence": "Will you serve this duchy once more, officially and with the honor you deserve?",
+            "end_sentence": "END",
+            "image_url": "https://drive.google.com/file/d/1gKjv2NMthDi3ahe7AVeWMX-HVsc8-CvG/view?usp=drivesdk"
+        }
+    ],
+    "default_movement_effects": [
+        "zoom_rotate_cycle"
+    ],
+    "default_transition_effects": [
+        "smoothleft",
+        "smoothright",
+        "fadeblack"
+    ],
+    "useAssemblyAI": true,
+    "fontOptions": {
+        "fontFamily": "SUSE Mono",
+        "fontSize": 24,
+        "fontColor": "&H00FFFFFF",
+        "outlineColor": "&H80000000",
+        "backgroundColor": "&H80000000",
+        "bold": 1,
+        "outline": 3,
+        "shadow": 1,
+        "alignment": 2,
+        "marginV": 30,
+        "marginL": 10,
+        "marginR": 10
+    }
+}

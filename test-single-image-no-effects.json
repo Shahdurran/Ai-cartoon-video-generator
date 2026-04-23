@@ -1,0 +1,9 @@
+{
+  "audioUrl": "https://www.soundjay.com/misc/sounds/bell-ringing-05.wav",
+  "imageUrl": "https://picsum.photos/1792/1024?random=101",
+  "videoId": "test-single-image-no-effects",
+  "useDynamicImages": false,
+  "useSubtitles": true,
+  "useEffect": false,
+  "disable_movement_effects": true
+}

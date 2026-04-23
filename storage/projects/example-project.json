@@ -1,0 +1,77 @@
+{
+  "id": "example-project-001",
+  "name": "AI Revolution Video",
+  "channelId": "example-channel-001",
+  "templateId": "example-template-001",
+  "status": "completed",
+  "script": "The AI revolution is here... (full script text)",
+  "scriptMetadata": {
+    "model": "claude-3-5-sonnet-20241022",
+    "tokens": 500,
+    "tone": "informative",
+    "length": "medium",
+    "generatedAt": "2025-01-15T10:00:00.000Z"
+  },
+  "imagePrompts": [
+    {
+      "sequence": 1,
+      "prompt": "A futuristic AI brain with glowing neural networks",
+      "description": "Opening shot representing AI technology"
+    },
+    {
+      "sequence": 2,
+      "prompt": "Robots and humans working together in a modern office",
+      "description": "AI collaboration in the workplace"
+    }
+  ],
+  "images": [
+    {
+      "imagePath": "./temp/project-001/image_1.jpg",
+      "metadata": {
+        "width": 1920,
+        "height": 1080,
+        "seed": 12345
+      }
+    }
+  ],
+  "audioPath": "./temp/project-001/voice.mp3",
+  "audioMetadata": {
+    "voice": "alloy",
+    "speed": 1.0,
+    "provider": "genaipro",
+    "duration": 75
+  },
+  "videoPath": "./public/videos/project-001-final.mp4",
+  "videoMetadata": {
+    "duration": 75,
+    "resolution": "1920x1080",
+    "fps": 30,
+    "effectsUsed": ["particle", "fade"]
+  },
+  "workflowSteps": [
+    {
+      "step": "script",
+      "success": true,
+      "completedAt": "2025-01-15T10:05:00.000Z"
+    },
+    {
+      "step": "images",
+      "success": true,
+      "completedAt": "2025-01-15T10:10:00.000Z"
+    },
+    {
+      "step": "voice",
+      "success": true,
+      "completedAt": "2025-01-15T10:12:00.000Z"
+    },
+    {
+      "step": "video",
+      "success": true,
+      "completedAt": "2025-01-15T10:20:00.000Z"
+    }
+  ],
+  "createdAt": "2025-01-15T10:00:00.000Z",
+  "updatedAt": "2025-01-15T10:20:00.000Z",
+  "completedAt": "2025-01-15T10:20:00.000Z"
+}
+

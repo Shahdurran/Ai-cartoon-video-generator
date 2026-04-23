@@ -1,0 +1,235 @@
+{
+  "id": "project_3178db11-89c3-4630-8e39-0bd90ab70d3f",
+  "jobId": "3",
+  "title": "The Rise and Fall of Ancient Rome",
+  "context": "Focus on the economic and political factors that led to both the rise and eventual collapse of the Roman Empire. Highlight key figures like Julius Caesar and Augustus.",
+  "status": "processing",
+  "steps": {
+    "script": {
+      "status": "completed",
+      "jobId": "5"
+    },
+    "voice": {
+      "status": "completed",
+      "jobId": "5"
+    },
+    "images": {
+      "status": "completed",
+      "jobId": "1"
+    },
+    "video": {
+      "status": "processing",
+      "jobId": "1"
+    }
+  },
+  "createdAt": "2025-10-24T22:00:10.785Z",
+  "updatedAt": "2025-10-24T22:00:25.892Z",
+  "script": "# The Rise and Fall of Ancient Rome\n\nEver wonder how Rome went from a small city-state to ruling the entire Mediterranean? Then lost it all?\n\n---\n\nIt started with ambition. Julius Caesar conquered Gaul, bringing wealth and power back to Rome. But his rise terrified the Senate. They saw him as a threat to their power. So they assassinated him in 44 BC.\n\n---\n\nEnter Augustus, Caesar's adopted heir. He was smarter. Instead of declaring himself king, he kept the Senate happy while quietly consolidating power. He reformed the military, stabilized the economy, and gave Rome peace after decades of civil war. People loved him. The empire flourished.\n\n---\n\nFor two centuries, Rome dominated. But success breeds complacency. The military became bloated. Taxes climbed higher. The government grew corrupt. Inflation spiraled out of control. Citizens stopped believing in the system.\n\n---\n\nThen came the invasions. Germanic tribes pressed the borders. The empire split in two, weakening its defense. By 476 AD, Rome fell. Not with a bang, but with a whimper.\n\nThe lesson? Even the mightiest empires crumble when they lose sight of what made them strong. Economic stability. Political integrity. And the people's trust.",
+  "sentences": [
+    {
+      "text": "# The Rise and Fall of Ancient Rome\n\nEver wonder how Rome went from a small city-state to ruling the entire Mediterranean?",
+      "index": 0,
+      "words": 22
+    },
+    {
+      "text": "Then lost it all?",
+      "index": 1,
+      "words": 4
+    },
+    {
+      "text": "---\n\nIt started with ambition.",
+      "index": 2,
+      "words": 5
+    },
+    {
+      "text": "Julius Caesar conquered Gaul, bringing wealth and power back to Rome.",
+      "index": 3,
+      "words": 11
+    },
+    {
+      "text": "But his rise terrified the Senate.",
+      "index": 4,
+      "words": 6
+    },
+    {
+      "text": "They saw him as a threat to their power.",
+      "index": 5,
+      "words": 9
+    },
+    {
+      "text": "So they assassinated him in 44 BC.",
+      "index": 6,
+      "words": 7
+    },
+    {
+      "text": "---\n\nEnter Augustus, Caesar's adopted heir.",
+      "index": 7,
+      "words": 6
+    },
+    {
+      "text": "He was smarter.",
+      "index": 8,
+      "words": 3
+    },
+    {
+      "text": "Instead of declaring himself king, he kept the Senate happy while quietly consolidating power.",
+      "index": 9,
+      "words": 14
+    },
+    {
+      "text": "He reformed the military, stabilized the economy, and gave Rome peace after decades of civil war.",
+      "index": 10,
+      "words": 16
+    },
+    {
+      "text": "People loved him.",
+      "index": 11,
+      "words": 3
+    },
+    {
+      "text": "The empire flourished.",
+      "index": 12,
+      "words": 3
+    },
+    {
+      "text": "---\n\nFor two centuries, Rome dominated.",
+      "index": 13,
+      "words": 6
+    },
+    {
+      "text": "But success breeds complacency.",
+      "index": 14,
+      "words": 4
+    },
+    {
+      "text": "The military became bloated.",
+      "index": 15,
+      "words": 4
+    },
+    {
+      "text": "Taxes climbed higher.",
+      "index": 16,
+      "words": 3
+    },
+    {
+      "text": "The government grew corrupt.",
+      "index": 17,
+      "words": 4
+    },
+    {
+      "text": "Inflation spiraled out of control.",
+      "index": 18,
+      "words": 5
+    },
+    {
+      "text": "Citizens stopped believing in the system.",
+      "index": 19,
+      "words": 6
+    },
+    {
+      "text": "---\n\nThen came the invasions.",
+      "index": 20,
+      "words": 5
+    },
+    {
+      "text": "Germanic tribes pressed the borders.",
+      "index": 21,
+      "words": 5
+    },
+    {
+      "text": "The empire split in two, weakening its defense.",
+      "index": 22,
+      "words": 8
+    },
+    {
+      "text": "By 476 AD, Rome fell.",
+      "index": 23,
+      "words": 5
+    },
+    {
+      "text": "Not with a bang, but with a whimper.",
+      "index": 24,
+      "words": 8
+    },
+    {
+      "text": "The lesson?",
+      "index": 25,
+      "words": 2
+    },
+    {
+      "text": "Even the mightiest empires crumble when they lose sight of what made them strong.",
+      "index": 26,
+      "words": 14
+    },
+    {
+      "text": "Economic stability.",
+      "index": 27,
+      "words": 2
+    },
+    {
+      "text": "Political integrity.",
+      "index": 28,
+      "words": 2
+    },
+    {
+      "text": "And the people's trust.",
+      "index": 29,
+      "words": 4
+    }
+  ],
+  "audioPath": "D:\\ffmpeg jim\\temp\\mock_voice_1761343215031.mp3",
+  "audioDuration": 79,
+  "images": [
+    {
+      "success": true,
+      "imagePath": "D:\\ffmpeg jim\\temp\\image_1761343219446_0.png",
+      "prompt": "# The Rise and Fall of Ancient Rome\n\nEver wonder how Rome went from a small city-state to ruling the entire Mediterranean?. High quality, detailed, cinematic, historical, cinematic style",
+      "index": 0,
+      "metadata": {
+        "prompt": "# The Rise and Fall of Ancient Rome\n\nEver wonder how Rome went from a small city-state to ruling the entire Mediterranean?. High quality, detailed, cinematic, historical, cinematic style",
+        "width": 1024,
+        "height": 576,
+        "model": "https://fal.run/fal-ai/flux/dev",
+        "seed": 1154292533,
+        "aspectRatio": "16:9",
+        "quality": "standard",
+        "processingTime": 2142,
+        "generatedAt": "2025-10-24T22:00:19.484Z"
+      }
+    },
+    {
+      "success": true,
+      "imagePath": "D:\\ffmpeg jim\\temp\\image_1761343222769_1.png",
+      "prompt": "Then lost it all?. High quality, detailed, cinematic, historical, cinematic style",
+      "index": 1,
+      "metadata": {
+        "prompt": "Then lost it all?. High quality, detailed, cinematic, historical, cinematic style",
+        "width": 1024,
+        "height": 576,
+        "model": "https://fal.run/fal-ai/flux/dev",
+        "seed": 513548904,
+        "aspectRatio": "16:9",
+        "quality": "standard",
+        "processingTime": 1463,
+        "generatedAt": "2025-10-24T22:00:22.806Z"
+      }
+    },
+    {
+      "success": true,
+      "imagePath": "D:\\ffmpeg jim\\temp\\image_1761343225841_2.png",
+      "prompt": "---\n\nIt started with ambition.. High quality, detailed, cinematic, historical, cinematic style",
+      "index": 2,
+      "metadata": {
+        "prompt": "---\n\nIt started with ambition.. High quality, detailed, cinematic, historical, cinematic style",
+        "width": 1024,
+        "height": 576,
+        "model": "https://fal.run/fal-ai/flux/dev",
+        "seed": 1560114786,
+        "aspectRatio": "16:9",
+        "quality": "standard",
+        "processingTime": 1305,
+        "generatedAt": "2025-10-24T22:00:25.879Z"
+      }
+    }
+  ]
+}

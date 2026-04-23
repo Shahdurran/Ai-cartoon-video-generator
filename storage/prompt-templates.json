@@ -1,0 +1,110 @@
+[
+  {
+    "id": "default-high-retention",
+    "name": "High Retention Storytelling",
+    "category": "Entertainment",
+    "customPrompt": "Create a highly engaging, retention-focused video script that:\n\n1. HOOK (First 3 seconds): Start with an irresistible hook - a shocking statement, intriguing question, or bold claim that makes viewers NEED to keep watching.\n\n2. PATTERN INTERRUPTS: Every 8-12 seconds, introduce something new:\n   - A surprising fact\n   - A plot twist\n   - A rhetorical question\n   - An emotional beat\n   - A cliffhanger that builds to the next section\n\n3. PACING:\n   - Use short, punchy sentences\n   - Vary sentence length for rhythm\n   - Create mini-cliffhangers before transitions\n   - Never let energy drop\n\n4. EMOTIONAL JOURNEY:\n   - Build curiosity early\n   - Escalate tension gradually\n   - Deliver satisfying payoffs\n   - End with impact that makes viewers want more\n\n5. VISUAL LANGUAGE:\n   - Write cinematically - every sentence should paint a picture\n   - Use active, vivid verbs\n   - Describe scenes that evoke emotion\n\nRETENTION TECHNIQUES:\n- Open loops (hint at information you'll reveal later)\n- Social proof (\"millions of people don't know this...\")\n- Relatability (\"we've all experienced...\")\n- Urgency (\"but here's what changes everything...\")\n\nThe goal: Keep viewers watching until the very last second.",
+    "tone": "dramatic",
+    "length": "medium",
+    "tags": [
+      "high-retention",
+      "viral",
+      "engaging",
+      "storytelling",
+      "hooks"
+    ],
+    "isDefault": true,
+    "createdAt": "2025-10-26T21:33:55.816Z",
+    "updatedAt": "2025-10-26T21:33:55.816Z"
+  },
+  {
+    "id": "default-educational",
+    "name": "Educational Deep Dive",
+    "category": "Education",
+    "customPrompt": "Create a clear, educational video script that:\n\n1. CLEAR HOOK: Start with a relatable problem or fascinating question that the video will answer.\n\n2. LOGICAL STRUCTURE:\n   - Introduction: State what viewers will learn\n   - Foundation: Build from simple concepts to complex\n   - Examples: Provide concrete, relatable examples\n   - Practical Application: Show how to use this knowledge\n   - Summary: Reinforce key takeaways\n\n3. TEACHING TECHNIQUES:\n   - Use analogies and metaphors\n   - Break complex ideas into simple steps\n   - Repeat key concepts in different ways\n   - Connect new information to what viewers already know\n\n4. ENGAGEMENT STRATEGIES:\n   - Ask rhetorical questions to prompt thinking\n   - Use \"imagine this...\" scenarios\n   - Provide \"aha moment\" revelations\n   - Address common misconceptions\n\n5. CLARITY:\n   - Define technical terms when introduced\n   - Use simple language without dumbing down\n   - One main idea per sentence\n   - Smooth transitions between concepts\n\nEDUCATIONAL GOALS:\n- Viewers should understand AND remember\n- Make complex topics accessible\n- Inspire curiosity for deeper learning\n- Provide actionable knowledge",
+    "tone": "informative",
+    "length": "long",
+    "tags": [
+      "educational",
+      "tutorial",
+      "learning",
+      "teaching",
+      "informative"
+    ],
+    "isDefault": true,
+    "createdAt": "2025-10-26T21:33:55.816Z",
+    "updatedAt": "2025-10-26T21:33:55.816Z"
+  },
+  {
+    "id": "default-dramatic-history",
+    "name": "Dramatic History",
+    "category": "History",
+    "customPrompt": "Create an epic, dramatic historical narrative that:\n\n1. EPIC OPENING: Begin with the moment of greatest drama, then rewind to build context.\n\n2. STORYTELLING APPROACH:\n   - Write like a thriller, not a textbook\n   - Focus on human stories and emotions\n   - Build tension toward pivotal moments\n   - Use vivid, sensory descriptions\n\n3. NARRATIVE TECHNIQUES:\n   - Present tense for immediacy (\"It's 1944. The tide is turning...\")\n   - Dramatic irony (reveal what historical figures didn't know)\n   - Foreshadowing (\"Little did they know...\")\n   - Cinematic scene-setting\n\n4. EMOTIONAL RESONANCE:\n   - Highlight human stakes and consequences\n   - Show the weight of decisions\n   - Capture the zeitgeist of the era\n   - Connect past to present impact\n\n5. HISTORICAL ACCURACY:\n   - Ground drama in verified facts\n   - Acknowledge historical debates when relevant\n   - Provide context for decisions and events\n\nDRAMATIC ELEMENTS:\n- Character-driven narratives (historical figures as protagonists)\n- Rising action and climactic moments\n- Moral complexity and difficult choices\n- Legacy and lasting impact\n\nMake history feel urgent, relevant, and impossible to look away from.",
+    "tone": "dramatic",
+    "length": "medium",
+    "tags": [
+      "history",
+      "dramatic",
+      "storytelling",
+      "narrative",
+      "epic"
+    ],
+    "isDefault": true,
+    "createdAt": "2025-10-26T21:33:55.816Z",
+    "updatedAt": "2025-10-26T21:33:55.816Z"
+  },
+  {
+    "id": "default-mystery",
+    "name": "Mystery & Intrigue",
+    "category": "Entertainment",
+    "customPrompt": "Create a mysterious, suspenseful video script that:\n\n1. MYSTERIOUS HOOK: Start with an unsettling question, strange occurrence, or unexplained phenomenon.\n\n2. SUSPENSE BUILDING:\n   - Reveal information gradually, piece by piece\n   - Plant questions in viewers' minds\n   - Use strategic pauses and moments of silence\n   - Build to revelations slowly\n\n3. NARRATIVE STRUCTURE:\n   - Layer mysteries (solve small questions to reach bigger ones)\n   - Use red herrings and misdirection\n   - Create \"wait, what?\" moments\n   - Save the biggest reveal for the end\n\n4. ATMOSPHERIC WRITING:\n   - Use mood-setting language\n   - Create unease and curiosity\n   - Employ cliffhangers between sections\n   - Write in a way that builds anticipation\n\n5. PACING:\n   - Start with intrigue, not exposition\n   - Escalate the strangeness\n   - Deliver satisfying explanations\n   - Leave room for wonder\n\nMYSTERY TECHNIQUES:\n- \"But here's where it gets strange...\"\n- \"What they found next would change everything...\"\n- \"The truth was far more disturbing...\"\n- Present evidence before conclusions\n\nKeep viewers on the edge of their seats, constantly wondering what comes next.",
+    "tone": "mysterious",
+    "length": "medium",
+    "tags": [
+      "mystery",
+      "suspense",
+      "intrigue",
+      "thriller",
+      "investigation"
+    ],
+    "isDefault": true,
+    "createdAt": "2025-10-26T21:33:55.816Z",
+    "updatedAt": "2025-10-26T21:33:55.816Z"
+  },
+  {
+    "id": "default-fast-paced",
+    "name": "Fast-Paced Entertainment",
+    "category": "Entertainment",
+    "customPrompt": "Create a rapid-fire, high-energy video script that:\n\n1. INSTANT HOOK: First sentence must be a banger. No warmup. Jump straight into the action.\n\n2. PACING:\n   - Short sentences. Quick cuts. Constant movement.\n   - New information every 3-5 seconds\n   - No filler. Every word earns its place.\n   - Maintain relentless forward momentum\n\n3. ENERGY:\n   - Use active voice exclusively\n   - Power verbs and dynamic language\n   - Present tense for immediacy\n   - Exclamation points for emphasis (but don't overdo it)\n\n4. STRUCTURE:\n   - List format works great (Top 5, 3 ways, etc.)\n   - Countdown format builds anticipation\n   - Rapid-fire facts with quick transitions\n   - Save the best for last to maintain retention\n\n5. MODERN STYLE:\n   - Conversational, almost breathless delivery\n   - Internet culture references when appropriate\n   - \"Wait for it...\" and callback moments\n   - Self-aware humor\n\nENERGY BOOSTERS:\n- \"But wait, it gets crazier...\"\n- \"And here's the best part...\"\n- \"Plot twist:\"\n- \"You won't believe what happened next...\"\n\nThis should feel like scrolling through the most interesting content feed ever. Fast, fun, and impossible to pause.",
+    "tone": "energetic",
+    "length": "short",
+    "tags": [
+      "fast-paced",
+      "energetic",
+      "viral",
+      "trending",
+      "quick"
+    ],
+    "isDefault": true,
+    "createdAt": "2025-10-26T21:33:55.816Z",
+    "updatedAt": "2025-10-26T21:33:55.816Z"
+  },
+  {
+    "id": "default-documentary",
+    "name": "Documentary Style",
+    "category": "Documentary",
+    "customPrompt": "Create a professional, documentary-style video script that:\n\n1. AUTHORITATIVE OPENING: Begin with a thesis statement or compelling question grounded in research.\n\n2. JOURNALISTIC APPROACH:\n   - Objective tone, let facts speak\n   - Multiple perspectives when appropriate\n   - Evidence-based statements\n   - Clear sourcing (\"According to researchers...\", \"Studies show...\")\n\n3. NARRATIVE STRUCTURE:\n   - Context and background first\n   - Present information logically\n   - Build from foundation to deeper insights\n   - Explore implications and consequences\n\n4. DOCUMENTARY TECHNIQUES:\n   - Observational descriptions\n   - Expert insights woven in naturally\n   - Data and statistics for credibility\n   - Balance information with storytelling\n\n5. DEPTH AND NUANCE:\n   - Acknowledge complexity\n   - Address counterarguments\n   - Provide historical context\n   - Connect micro to macro (personal stories to bigger picture)\n\nDOCUMENTARY QUALITIES:\n- Thoughtful pacing (let important moments breathe)\n- Measured, confident narration style\n- Visual storytelling cues\n- Reflective conclusions that invite thought\n\nCREDIBILITY MARKERS:\n- Specific dates, numbers, and names\n- \"Research shows...\" or \"Experts believe...\"\n- Avoiding speculation (or clearly labeling it)\n- Balanced presentation of different viewpoints\n\nCreate content that feels PBS/BBC quality - informative, authoritative, and deeply engaging.",
+    "tone": "authoritative",
+    "length": "long",
+    "tags": [
+      "documentary",
+      "professional",
+      "research",
+      "authoritative",
+      "in-depth"
+    ],
+    "isDefault": true,
+    "createdAt": "2025-10-26T21:33:55.816Z",
+    "updatedAt": "2025-10-26T21:33:55.816Z"
+  }
+]

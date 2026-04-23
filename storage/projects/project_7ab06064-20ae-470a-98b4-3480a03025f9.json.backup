@@ -1,0 +1,190 @@
+{
+  "id": "project_7ab06064-20ae-470a-98b4-3480a03025f9",
+  "jobId": "1",
+  "title": "The Rise and Fall of Ancient Rome",
+  "context": "Focus on the economic and political factors that led to both the rise and eventual collapse of the Roman Empire. Highlight key figures like Julius Caesar and Augustus.",
+  "status": "processing",
+  "steps": {
+    "script": {
+      "status": "completed",
+      "jobId": "3"
+    },
+    "voice": {
+      "status": "processing",
+      "jobId": "3"
+    },
+    "images": {
+      "status": "pending",
+      "jobId": null
+    },
+    "video": {
+      "status": "pending",
+      "jobId": null
+    }
+  },
+  "createdAt": "2025-10-24T19:45:19.678Z",
+  "updatedAt": "2025-10-24T19:45:26.781Z",
+  "script": "Ever wonder why Rome went from a small city-state to ruling the entire Mediterranean world? And then... just collapsed?\n\nThe answer lies in money and power.\n\n---\n\nIt all started with the Punic Wars. Rome defeated Carthage and suddenly had access to massive wealth and resources. This triggered an economic boom. Trade routes exploded. The empire grew richer by the day.\n\nBut here's where it gets interesting. That wealth created a problem. The gap between the super-rich and everyone else became absolutely massive. Political corruption skyrocketed.\n\n---\n\nEnter Julius Caesar. He was brilliant, ambitious, and incredibly popular with the people. He promised land, wealth, and stability. The poor loved him. The wealthy Senate? They were terrified. So they had him assassinated in 44 BC.\n\n---\n\nHis adopted heir, Augustus, learned from Caesar's mistakes. Instead of grabbing power openly, he played the political game carefully. He kept the Senate happy while quietly consolidating control. It worked. Augustus brought peace, rebuilt the economy, and established a system that lasted for centuries.\n\n---\n\nBut empires don't last forever. By the 300s AD, Rome faced constant military threats, economic inflation, and massive government spending. The empire was stretched too thin. And then it fractured. The Western Roman Empire finally fell in 476 AD.\n\nThe lesson? Even the mightiest empires can't escape the consequences of corruption, inequality, and overextension.",
+  "sentences": [
+    {
+      "text": "Ever wonder why Rome went from a small city-state to ruling the entire Mediterranean world?",
+      "index": 0,
+      "words": 15
+    },
+    {
+      "text": "And then...",
+      "index": 1,
+      "words": 2
+    },
+    {
+      "text": "just collapsed?",
+      "index": 2,
+      "words": 2
+    },
+    {
+      "text": "The answer lies in money and power.",
+      "index": 3,
+      "words": 7
+    },
+    {
+      "text": "---\n\nIt all started with the Punic Wars.",
+      "index": 4,
+      "words": 8
+    },
+    {
+      "text": "Rome defeated Carthage and suddenly had access to massive wealth and resources.",
+      "index": 5,
+      "words": 12
+    },
+    {
+      "text": "This triggered an economic boom.",
+      "index": 6,
+      "words": 5
+    },
+    {
+      "text": "Trade routes exploded.",
+      "index": 7,
+      "words": 3
+    },
+    {
+      "text": "The empire grew richer by the day.",
+      "index": 8,
+      "words": 7
+    },
+    {
+      "text": "But here's where it gets interesting.",
+      "index": 9,
+      "words": 6
+    },
+    {
+      "text": "That wealth created a problem.",
+      "index": 10,
+      "words": 5
+    },
+    {
+      "text": "The gap between the super-rich and everyone else became absolutely massive.",
+      "index": 11,
+      "words": 11
+    },
+    {
+      "text": "Political corruption skyrocketed.",
+      "index": 12,
+      "words": 3
+    },
+    {
+      "text": "---\n\nEnter Julius Caesar.",
+      "index": 13,
+      "words": 4
+    },
+    {
+      "text": "He was brilliant, ambitious, and incredibly popular with the people.",
+      "index": 14,
+      "words": 10
+    },
+    {
+      "text": "He promised land, wealth, and stability.",
+      "index": 15,
+      "words": 6
+    },
+    {
+      "text": "The poor loved him.",
+      "index": 16,
+      "words": 4
+    },
+    {
+      "text": "The wealthy Senate?",
+      "index": 17,
+      "words": 3
+    },
+    {
+      "text": "They were terrified.",
+      "index": 18,
+      "words": 3
+    },
+    {
+      "text": "So they had him assassinated in 44 BC.",
+      "index": 19,
+      "words": 8
+    },
+    {
+      "text": "---\n\nHis adopted heir, Augustus, learned from Caesar's mistakes.",
+      "index": 20,
+      "words": 9
+    },
+    {
+      "text": "Instead of grabbing power openly, he played the political game carefully.",
+      "index": 21,
+      "words": 11
+    },
+    {
+      "text": "He kept the Senate happy while quietly consolidating control.",
+      "index": 22,
+      "words": 9
+    },
+    {
+      "text": "It worked.",
+      "index": 23,
+      "words": 2
+    },
+    {
+      "text": "Augustus brought peace, rebuilt the economy, and established a system that lasted for centuries.",
+      "index": 24,
+      "words": 14
+    },
+    {
+      "text": "---\n\nBut empires don't last forever.",
+      "index": 25,
+      "words": 6
+    },
+    {
+      "text": "By the 300s AD, Rome faced constant military threats, economic inflation, and massive government spending.",
+      "index": 26,
+      "words": 15
+    },
+    {
+      "text": "The empire was stretched too thin.",
+      "index": 27,
+      "words": 6
+    },
+    {
+      "text": "And then it fractured.",
+      "index": 28,
+      "words": 4
+    },
+    {
+      "text": "The Western Roman Empire finally fell in 476 AD.",
+      "index": 29,
+      "words": 9
+    },
+    {
+      "text": "The lesson?",
+      "index": 30,
+      "words": 2
+    },
+    {
+      "text": "Even the mightiest empires can't escape the consequences of corruption, inequality, and overextension.",
+      "index": 31,
+      "words": 13
+    }
+  ]
+}
