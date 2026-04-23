@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import { NewProjectForm } from './NewProjectForm';
 
@@ -22,7 +23,15 @@ export default async function NewProjectPage() {
   const bootstrap = await loadBootstrap();
   return (
     <div className="max-w-4xl mx-auto px-6 py-10">
-      <h1 className="text-3xl font-semibold tracking-tight mb-8">New project</h1>
+      <Link
+        href="/"
+        className="text-xs text-ink-100/60 hover:text-white transition"
+      >
+        ← All projects
+      </Link>
+      <h1 className="text-4xl font-semibold tracking-tight mt-3 mb-8 text-white animate-fade-up">
+        New <span className="text-gradient">project</span>
+      </h1>
       <NewProjectForm {...bootstrap} />
     </div>
   );

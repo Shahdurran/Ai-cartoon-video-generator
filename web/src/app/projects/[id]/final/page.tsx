@@ -8,16 +8,17 @@ export default async function FinalPage({ params }: { params: { id: string } }) 
   const { project } = await api.getProject(params.id);
   return (
     <div className="max-w-5xl mx-auto px-6 py-10">
-      <div className="mb-6">
-        <Link href={`/projects/${project.id}`} className="text-sm text-slate-500 hover:text-slate-700">
-          ← Back to project
-        </Link>
-      </div>
-      <h1 className="text-3xl font-semibold tracking-tight mb-2">
+      <Link
+        href={`/projects/${project.id}`}
+        className="text-xs text-ink-100/60 hover:text-white transition"
+      >
+        ← Back to project
+      </Link>
+      <h1 className="text-4xl font-semibold tracking-tight mt-3 mb-2 text-white animate-fade-up">
         {project.topic || 'Untitled'}
       </h1>
-      <p className="text-sm text-slate-500 mb-8">
-        Status: <span className="font-medium text-slate-700">{project.status}</span>
+      <p className="text-sm text-ink-100/70 mb-8 animate-fade-up stagger-1">
+        Status: <span className="font-medium text-white">{project.status}</span>
       </p>
       <FinalVideo initialProject={project} />
     </div>

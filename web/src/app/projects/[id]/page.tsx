@@ -15,7 +15,7 @@ export default async function ProjectPage({ params }: { params: { id: string } }
     }
     return (
       <div className="max-w-6xl mx-auto px-6 py-10">
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+        <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-4 text-sm text-rose-200">
           Failed to load project: {err.message}
         </div>
       </div>
@@ -29,14 +29,12 @@ export default async function ProjectPage({ params }: { params: { id: string } }
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-10">
-      <div className="mb-6">
-        <Link
-          href="/"
-          className="text-sm text-slate-500 hover:text-slate-700"
-        >
-          ← All projects
-        </Link>
-      </div>
+      <Link
+        href="/"
+        className="text-xs text-ink-100/60 hover:text-white transition mb-6 inline-block"
+      >
+        ← All projects
+      </Link>
       <ProjectDetail
         initialProject={project}
         voices={voicesRes.status === 'fulfilled' ? voicesRes.value.voices : []}

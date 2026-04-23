@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type Style, type Voice, type MusicTrack } from '@/lib/api';
+import { VoicePreviewCard } from '@/components/VoicePreviewCard';
+import { AudioPreviewButton } from '@/components/AudioPreviewButton';
 
 type Props = {
   styles: Style[];
@@ -20,11 +22,23 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
   const [sceneCount, setSceneCount] = useState(5);
   const [totalDurationSeconds, setTotalDurationSeconds] = useState<number | ''>(30);
   const [voiceId, setVoiceId] = useState(voices[0]?.voiceId || '');
+  const [voiceQuery, setVoiceQuery] = useState('');
   const [musicTrackId, setMusicTrackId] = useState<string | ''>('');
   const [musicVolume, setMusicVolume] = useState(0.15);
   const [tone, setTone] = useState('dramatic');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const filteredVoices = useMemo(() => {
+    if (!voiceQuery.trim()) return voices;
+    const q = voiceQuery.toLowerCase();
+    return voices.filter(
+      (v) =>
+        v.name.toLowerCase().includes(q) ||
+        v.category?.toLowerCase().includes(q) ||
+        Object.values(v.labels || {}).some((l) => l?.toLowerCase().includes(q))
+    );
+  }, [voices, voiceQuery]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -58,19 +72,19 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
   return (
     <form onSubmit={handleSubmit} className="space-y-10">
       {/* Input mode */}
-      <section>
-        <h2 className="text-lg font-medium mb-3">1. What's the video about?</h2>
+      <section className="animate-fade-up">
+        <SectionHeader step="1" title="What's the video about?" />
         <div className="flex gap-2 mb-3">
           {(['topic', 'rewrite'] as const).map((m) => (
             <button
               key={m}
               type="button"
               onClick={() => setMode(m)}
-              className={`px-3 py-1.5 rounded-md text-sm border ${
+              className={
                 mode === m
-                  ? 'bg-brand-600 text-white border-brand-600'
-                  : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
-              }`}
+                  ? 'btn-primary !px-4 !py-1.5 !text-xs'
+                  : 'btn-ghost !px-4 !py-1.5 !text-xs'
+              }
             >
               {m === 'topic' ? 'Just a topic' : 'From an existing script'}
             </button>
@@ -82,44 +96,56 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
             onChange={(e) => setTopic(e.target.value)}
             placeholder="e.g. A dog who discovers he can talk to squirrels"
             rows={3}
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+            className="field"
           />
         ) : (
           <textarea
             value={sourceScript}
             onChange={(e) => setSourceScript(e.target.value)}
-            placeholder="Paste an existing script -- it will be broken into scenes"
+            placeholder="Paste an existing script — it will be broken into scenes"
             rows={8}
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none font-mono text-sm"
+            className="field font-mono"
           />
         )}
       </section>
 
       {/* Style picker */}
-      <section>
-        <h2 className="text-lg font-medium mb-3">2. Pick a style</h2>
+      <section className="animate-fade-up stagger-1">
+        <SectionHeader step="2" title="Pick a style" />
         {styles.length === 0 ? (
-          <div className="text-sm text-rose-600">
+          <div className="text-sm text-rose-300">
             No styles configured. Run <code>npm run seed</code> on the backend.
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {styles.map((s) => (
+            {styles.map((s, i) => (
               <button
                 key={s.id}
                 type="button"
                 onClick={() => setStyleId(s.id)}
-                className={`text-left rounded-lg border p-3 transition ${
+                className={`group text-left rounded-2xl border p-3 transition animate-fade-up ${
                   styleId === s.id
-                    ? 'border-brand-500 ring-2 ring-brand-200 bg-white'
-                    : 'border-slate-200 bg-white hover:border-slate-300'
+                    ? 'border-brand-400/60 bg-white/[0.08] shadow-glass'
+                    : 'border-white/10 bg-white/[0.03] hover:border-white/25 hover:bg-white/[0.06]'
                 }`}
+                style={{ animationDelay: `${i * 40}ms` }}
               >
                 <div
-                  className="aspect-video w-full rounded-md bg-slate-100 bg-center bg-cover mb-2"
-                  style={s.thumbnailUrl ? { backgroundImage: `url(${s.thumbnailUrl})` } : {}}
-                />
-                <div className="text-sm font-medium">{s.name}</div>
+                  className="aspect-video w-full rounded-xl mb-2 bg-center bg-cover relative overflow-hidden"
+                  style={
+                    s.thumbnailUrl
+                      ? { backgroundImage: `url(${s.thumbnailUrl})` }
+                      : {
+                          backgroundImage:
+                            'linear-gradient(135deg, rgba(255,168,70,0.3), rgba(255,70,137,0.3))',
+                        }
+                  }
+                >
+                  {styleId === s.id && (
+                    <span className="absolute inset-0 ring-2 ring-brand-400/60 rounded-xl" />
+                  )}
+                </div>
+                <div className="text-sm font-medium text-white">{s.name}</div>
               </button>
             ))}
           </div>
@@ -127,20 +153,20 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
       </section>
 
       {/* Scene + duration */}
-      <section className="grid grid-cols-2 gap-6">
+      <section className="grid grid-cols-2 gap-6 animate-fade-up stagger-2">
         <label className="block">
-          <span className="text-sm font-medium">Scenes</span>
+          <span className="label mb-1.5 block">Scenes</span>
           <input
             type="number"
             min={1}
             max={20}
             value={sceneCount}
             onChange={(e) => setSceneCount(parseInt(e.target.value || '0', 10))}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+            className="field"
           />
         </label>
         <label className="block">
-          <span className="text-sm font-medium">Target duration (seconds)</span>
+          <span className="label mb-1.5 block">Target duration (seconds)</span>
           <input
             type="number"
             min={6}
@@ -149,38 +175,58 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
             onChange={(e) =>
               setTotalDurationSeconds(e.target.value ? parseInt(e.target.value, 10) : '')
             }
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+            className="field"
           />
         </label>
       </section>
 
-      {/* Voice + tone */}
-      <section className="grid grid-cols-2 gap-6">
-        <label className="block">
-          <span className="text-sm font-medium">Voice</span>
-          {voicesError ? (
-            <div className="mt-1 text-xs text-rose-600">{voicesError}</div>
-          ) : (
-            <select
-              value={voiceId}
-              onChange={(e) => setVoiceId(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 bg-white"
-            >
-              <option value="">— Select a voice —</option>
-              {voices.map((v) => (
-                <option key={v.voiceId} value={v.voiceId}>
-                  {v.name}{v.category ? ` (${v.category})` : ''}
-                </option>
+      {/* Voice picker with previews */}
+      <section className="animate-fade-up stagger-3">
+        <SectionHeader step="3" title="Choose a voice" />
+        {voicesError ? (
+          <div className="text-xs text-rose-300">{voicesError}</div>
+        ) : voices.length === 0 ? (
+          <div className="text-xs text-ink-200/70">No voices available.</div>
+        ) : (
+          <>
+            <input
+              placeholder="Search voices…"
+              value={voiceQuery}
+              onChange={(e) => setVoiceQuery(e.target.value)}
+              className="field mb-3"
+            />
+            <div className="grid sm:grid-cols-2 gap-2 max-h-[360px] overflow-y-auto pr-1">
+              {filteredVoices.map((v, i) => (
+                <div
+                  key={v.voiceId}
+                  className="animate-fade-up"
+                  style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}
+                >
+                  <VoicePreviewCard
+                    voice={v}
+                    selected={voiceId === v.voiceId}
+                    onSelect={() => setVoiceId(v.voiceId)}
+                  />
+                </div>
               ))}
-            </select>
-          )}
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium">Tone</span>
+              {filteredVoices.length === 0 && (
+                <div className="col-span-full text-xs text-ink-200/70 text-center py-6">
+                  No voices match &ldquo;{voiceQuery}&rdquo;.
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* Tone */}
+      <section className="animate-fade-up stagger-4">
+        <label className="block max-w-xs">
+          <span className="label mb-1.5 block">Tone</span>
           <select
             value={tone}
             onChange={(e) => setTone(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 bg-white"
+            className="field"
           >
             <option value="dramatic">Dramatic</option>
             <option value="playful">Playful</option>
@@ -192,25 +238,50 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
       </section>
 
       {/* Music */}
-      <section className="grid grid-cols-2 gap-6">
-        <label className="block">
-          <span className="text-sm font-medium">Background music</span>
-          <select
-            value={musicTrackId}
-            onChange={(e) => setMusicTrackId(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 bg-white"
+      <section className="animate-fade-up stagger-5">
+        <SectionHeader step="4" title="Background music" />
+        <div className="grid sm:grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => setMusicTrackId('')}
+            className={`text-left rounded-2xl border p-4 transition ${
+              !musicTrackId
+                ? 'border-brand-400/60 bg-white/[0.08]'
+                : 'border-white/10 bg-white/[0.03] hover:border-white/25 hover:bg-white/[0.06]'
+            }`}
           >
-            <option value="">— None —</option>
-            {tracks.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium">
-            Music volume: {Math.round(musicVolume * 100)}%
+            <div className="text-sm font-medium text-white">None</div>
+            <div className="text-[11px] text-ink-200/70 mt-0.5">
+              No background music
+            </div>
+          </button>
+          {tracks.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setMusicTrackId(t.id)}
+              className={`text-left rounded-2xl border p-4 transition flex items-center gap-3 ${
+                musicTrackId === t.id
+                  ? 'border-brand-400/60 bg-white/[0.08]'
+                  : 'border-white/10 bg-white/[0.03] hover:border-white/25 hover:bg-white/[0.06]'
+              }`}
+            >
+              <AudioPreviewButton src={t.previewUrl} size="sm" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-white truncate">
+                  {t.name}
+                </div>
+                <div className="text-[11px] text-ink-200/70 truncate">
+                  {t.durationSeconds ? `${Math.round(t.durationSeconds)}s` : ''}
+                  {t.tags.length > 0 ? ` · ${t.tags.join(', ')}` : ''}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+        <label className="block mt-4 max-w-md">
+          <span className="label mb-1.5 block">
+            Volume: {Math.round(musicVolume * 100)}%
           </span>
           <input
             type="range"
@@ -219,13 +290,13 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
             step={0.05}
             value={musicVolume}
             onChange={(e) => setMusicVolume(parseFloat(e.target.value))}
-            className="mt-3 w-full"
+            className="w-full"
           />
         </label>
       </section>
 
       {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200 animate-fade-in">
           {error}
         </div>
       )}
@@ -234,11 +305,27 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
         <button
           type="submit"
           disabled={submitting}
-          className="inline-flex items-center rounded-lg bg-brand-600 text-white px-5 py-2.5 text-sm font-medium shadow-sm hover:bg-brand-700 disabled:opacity-60 disabled:cursor-not-allowed"
+          className="btn-primary !px-6 !py-3"
         >
           {submitting ? 'Creating…' : 'Create project'}
         </button>
       </div>
     </form>
+  );
+}
+
+function SectionHeader({ step, title }: { step: string; title: string }) {
+  return (
+    <div className="flex items-center gap-3 mb-4">
+      <span
+        className="inline-flex items-center justify-center h-7 w-7 rounded-full text-xs font-semibold text-white shadow-md"
+        style={{
+          backgroundImage: 'linear-gradient(135deg, #FFA846 0%, #FF4689 100%)',
+        }}
+      >
+        {step}
+      </span>
+      <h2 className="text-lg font-medium text-white">{title}</h2>
+    </div>
   );
 }

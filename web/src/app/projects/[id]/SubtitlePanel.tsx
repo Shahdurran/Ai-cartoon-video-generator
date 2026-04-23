@@ -38,15 +38,15 @@ export function SubtitlePanel({
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
-      <h3 className="font-medium mb-3">Subtitles</h3>
+    <div className="glass-panel animate-fade-up">
+      <h3 className="font-medium text-white mb-3">Subtitles</h3>
 
-      {/* Live preview strip */}
+      {/* Live preview strip — uses the brand gradient so settings feel native. */}
       <div
-        className="aspect-video w-full rounded-md relative overflow-hidden mb-3"
+        className="aspect-video w-full rounded-xl relative overflow-hidden mb-3 border border-white/10"
         style={{
           backgroundImage:
-            'linear-gradient(135deg, #4c1d95 0%, #7c3aed 50%, #6366f1 100%)',
+            'linear-gradient(135deg, #FFA846 0%, #FF4689 55%, #1C030D 100%)',
         }}
       >
         <div
@@ -73,11 +73,11 @@ export function SubtitlePanel({
         </div>
       </div>
 
-      <label className="block text-xs text-slate-600">Font</label>
+      <label className="label">Font</label>
       <select
         value={fontName}
         onChange={(e) => setFontName(e.target.value)}
-        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 bg-white text-sm"
+        className="field mt-1.5"
       >
         {FONTS.map((f) => (
           <option key={f} value={f}>{f}</option>
@@ -86,54 +86,55 @@ export function SubtitlePanel({
 
       <div className="grid grid-cols-2 gap-3 mt-3">
         <label className="block">
-          <span className="text-xs text-slate-600">Size: {fontSize}</span>
+          <span className="label">Size: {fontSize}</span>
           <input
             type="range"
             min={16}
             max={48}
             value={fontSize}
             onChange={(e) => setFontSize(parseInt(e.target.value, 10))}
-            className="w-full mt-1"
+            className="w-full mt-1.5"
           />
         </label>
         <label className="block">
-          <span className="text-xs text-slate-600">Color</span>
+          <span className="label">Color</span>
           <input
             type="color"
             value={fontColor}
             onChange={(e) => setFontColor(e.target.value.toUpperCase())}
-            className="w-full h-[30px] rounded border border-slate-200"
+            className="w-full h-[34px] mt-1.5"
           />
         </label>
       </div>
 
       <div className="grid grid-cols-2 gap-3 mt-3">
         <label className="block">
-          <span className="text-xs text-slate-600">Position</span>
+          <span className="label">Position</span>
           <select
             value={position}
             onChange={(e) => setPosition(e.target.value as any)}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 bg-white text-sm"
+            className="field mt-1.5"
           >
             <option value="top">Top</option>
             <option value="middle">Middle</option>
             <option value="bottom">Bottom</option>
           </select>
         </label>
-        <label className="flex items-center gap-2 pt-5">
+        <label className="flex items-center gap-2 pt-6">
           <input
             type="checkbox"
             checked={outline}
             onChange={(e) => setOutline(e.target.checked)}
+            className="accent-brand-400"
           />
-          <span className="text-xs text-slate-700">Outline</span>
+          <span className="text-xs text-ink-100/80">Outline</span>
         </label>
       </div>
 
       <button
         onClick={save}
         disabled={saving}
-        className="mt-4 w-full rounded-md bg-brand-600 text-white px-3 py-1.5 text-sm hover:bg-brand-700 disabled:opacity-60"
+        className="btn-primary mt-5 w-full"
       >
         {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save subtitle settings'}
       </button>

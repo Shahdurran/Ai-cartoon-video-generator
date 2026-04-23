@@ -8,6 +8,7 @@ import { ScenePicker } from './ScenePicker';
 import { VoiceoverPanel } from './VoiceoverPanel';
 import { SubtitlePanel } from './SubtitlePanel';
 import { MusicLibraryModal } from './MusicLibraryModal';
+import { AudioPreviewButton } from '@/components/AudioPreviewButton';
 
 type Props = {
   initialProject: Project;
@@ -63,20 +64,21 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
     project.scenes.every((s) => s.selectedImageId);
   const hasVoice = project.voiceId;
   const ready = allSceneImagesPicked && hasVoice;
+  const selectedTrack = tracks.find((t) => t.id === project.musicTrackId);
 
   return (
     <div>
-      <div className="flex items-start justify-between mb-8 gap-4">
+      <div className="flex items-start justify-between mb-8 gap-4 animate-fade-up">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">
+          <h1 className="text-4xl font-semibold tracking-tight text-white">
             {project.topic || 'Untitled project'}
           </h1>
-          <div className="mt-2 text-sm text-slate-500">
+          <div className="mt-2 text-sm text-ink-100/70">
             {project.sceneCount} scenes · status:{' '}
-            <span className="font-medium text-slate-700">{project.status}</span>
+            <span className="font-medium text-white">{project.status}</span>
           </div>
           {project.errorMessage && (
-            <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            <div className="mt-3 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
               {project.errorMessage}
             </div>
           )}
@@ -85,7 +87,7 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
           {project.outputKey && (
             <Link
               href={`/projects/${project.id}/final`}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm hover:bg-slate-50"
+              className="btn-ghost"
             >
               View final →
             </Link>
@@ -93,7 +95,7 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
           <button
             onClick={handleGenerate}
             disabled={!ready || submitting}
-            className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-brand-700 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="btn-primary"
           >
             {submitting ? 'Starting…' : 'Generate video'}
           </button>
@@ -101,7 +103,7 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <div className="mb-6 rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200 animate-fade-in">
           {error}
         </div>
       )}
@@ -109,19 +111,30 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
       <div className="grid grid-cols-3 gap-8">
         <div className="col-span-2 space-y-6">
           {project.scenes.length === 0 ? (
-            <div className="rounded-xl border-2 border-dashed border-slate-200 p-12 text-center">
-              <div className="text-sm text-slate-600">
+            <div className="glass rounded-2xl p-12 text-center animate-fade-up">
+              <div className="mx-auto mb-4 h-10 w-10 rounded-full animate-glow"
+                style={{
+                  backgroundImage:
+                    'linear-gradient(135deg, #FFA846 0%, #FF4689 100%)',
+                }}
+              />
+              <div className="text-sm text-ink-100/80">
                 Claude is writing your scene breakdown…
               </div>
             </div>
           ) : (
-            project.scenes.map((scene) => (
-              <ScenePicker
+            project.scenes.map((scene, i) => (
+              <div
                 key={scene.id}
-                projectId={project.id}
-                scene={scene}
-                onChange={refresh}
-              />
+                className="animate-fade-up"
+                style={{ animationDelay: `${Math.min(i, 6) * 40}ms` }}
+              >
+                <ScenePicker
+                  projectId={project.id}
+                  scene={scene}
+                  onChange={refresh}
+                />
+              </div>
             ))
           )}
         </div>
@@ -139,22 +152,33 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
             currentSettings={project.subtitleSettings}
             onSaved={refresh}
           />
-          <div className="rounded-xl border border-slate-200 bg-white p-5">
-            <h3 className="font-medium">Background music</h3>
-            <p className="mt-1 text-xs text-slate-500">
-              {project.musicTrackId
-                ? tracks.find((t) => t.id === project.musicTrackId)?.name ||
-                  'Selected'
-                : 'No music selected'}
-            </p>
+          <div className="glass-panel animate-fade-up">
+            <h3 className="font-medium text-white">Background music</h3>
+            {selectedTrack ? (
+              <div className="mt-3 flex items-center gap-3">
+                <AudioPreviewButton src={selectedTrack.previewUrl} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-white truncate">
+                    {selectedTrack.name}
+                  </div>
+                  <div className="text-[11px] text-ink-200/70">
+                    {selectedTrack.durationSeconds
+                      ? `${Math.round(selectedTrack.durationSeconds)}s`
+                      : ''}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-1 text-xs text-ink-200/70">No music selected</p>
+            )}
             <button
               onClick={() => setMusicModalOpen(true)}
-              className="mt-3 text-sm rounded-md border border-slate-200 px-3 py-1.5 hover:bg-slate-50"
+              className="btn-ghost mt-3 !px-3 !py-1.5 !text-xs"
             >
-              {project.musicTrackId ? 'Change' : 'Browse library'}
+              {project.musicTrackId ? 'Change track' : 'Browse library'}
             </button>
             <div className="mt-4">
-              <label className="text-xs text-slate-600">
+              <label className="label block">
                 Volume: {Math.round((Number(project.musicVolume) || 0) * 100)}%
               </label>
               <input
@@ -169,7 +193,7 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
                     await api.patchProject(project.id, { musicVolume: v } as any);
                   } catch (_) { /* ignore */ }
                 }}
-                className="w-full mt-1"
+                className="w-full mt-2"
               />
             </div>
           </div>

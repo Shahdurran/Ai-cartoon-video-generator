@@ -49,26 +49,38 @@ export function ScenePicker({
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
+    <div className="glass-panel">
       <div className="flex items-start justify-between mb-4">
         <div>
-          <div className="text-xs uppercase tracking-wide text-slate-500">
+          <div className="text-[11px] uppercase tracking-wider text-brand-100/80 font-medium">
             Scene {scene.sceneIndex + 1}
           </div>
-          <div className="text-sm mt-1 text-slate-700 leading-relaxed">
+          <div className="text-sm mt-1 text-ink-50 leading-relaxed">
             {scene.voiceoverText}
           </div>
-          <div className="text-xs text-slate-500 mt-1">
+          <div className="text-[11px] text-ink-200/70 mt-1.5">
             {scene.durationSeconds}s · {scene.status}
           </div>
         </div>
       </div>
 
       {scene.imageVariants.length === 0 ? (
-        <div className="rounded-lg border-2 border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
-          {scene.status === 'failed'
-            ? `Failed: ${scene.errorMessage || 'unknown error'}`
-            : 'Generating variants…'}
+        <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-ink-100/70">
+          {scene.status === 'failed' ? (
+            <span className="text-rose-300">
+              Failed: {scene.errorMessage || 'unknown error'}
+            </span>
+          ) : (
+            <div className="flex items-center justify-center gap-3">
+              <span className="h-3 w-3 rounded-full animate-glow"
+                style={{
+                  backgroundImage:
+                    'linear-gradient(135deg, #FFA846 0%, #FF4689 100%)',
+                }}
+              />
+              Generating variants…
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-3">
@@ -78,8 +90,10 @@ export function ScenePicker({
               <button
                 key={variant.id}
                 onClick={() => select(variant.id)}
-                className={`relative aspect-video rounded-lg overflow-hidden border-2 transition ${
-                  selected ? 'border-brand-500 ring-2 ring-brand-200' : 'border-transparent hover:border-slate-300'
+                className={`relative aspect-video rounded-xl overflow-hidden border-2 transition ${
+                  selected
+                    ? 'border-brand-400/70 ring-2 ring-brand-400/30'
+                    : 'border-white/10 hover:border-white/30'
                 }`}
               >
                 {variant.signedUrl ? (
@@ -90,17 +104,23 @@ export function ScenePicker({
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div className="w-full h-full bg-slate-200 flex items-center justify-center text-xs text-slate-500">
-                    (no preview)
+                  <div className="w-full h-full shimmer flex items-center justify-center text-[11px] text-ink-100/60">
+                    rendering
                   </div>
                 )}
                 {selected && (
-                  <span className="absolute top-1 right-1 rounded-full bg-brand-600 text-white text-[10px] px-1.5 py-0.5">
+                  <span
+                    className="absolute top-1 right-1 pill text-white text-[10px]"
+                    style={{
+                      backgroundImage:
+                        'linear-gradient(135deg, #FFA846 0%, #FF4689 100%)',
+                    }}
+                  >
                     selected
                   </span>
                 )}
                 {variant.isCustomUpload && (
-                  <span className="absolute bottom-1 left-1 rounded-full bg-slate-900/70 text-white text-[10px] px-1.5 py-0.5">
+                  <span className="absolute bottom-1 left-1 pill bg-ink-800/80 text-white border border-white/10">
                     custom
                   </span>
                 )}
@@ -110,15 +130,15 @@ export function ScenePicker({
         </div>
       )}
 
-      <div className="mt-4 flex items-center gap-3">
+      <div className="mt-4 flex items-center gap-3 flex-wrap">
         <button
           onClick={() => setShowPromptTweak((v) => !v)}
           disabled={busy}
-          className="text-sm rounded-md border border-slate-200 px-3 py-1.5 hover:bg-slate-50 disabled:opacity-60"
+          className="btn-ghost !px-3 !py-1.5 !text-xs"
         >
           {showPromptTweak ? 'Cancel' : 'Regenerate with new prompt'}
         </button>
-        <label className="text-sm rounded-md border border-slate-200 px-3 py-1.5 hover:bg-slate-50 cursor-pointer">
+        <label className="btn-ghost !px-3 !py-1.5 !text-xs cursor-pointer">
           Upload custom image
           <input
             ref={fileInput}
@@ -129,21 +149,26 @@ export function ScenePicker({
             disabled={busy}
           />
         </label>
-        {busy && <span className="text-xs text-slate-500">Working…</span>}
+        {busy && (
+          <span className="text-[11px] text-ink-200/70 flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-brand-400 animate-glow" />
+            Working…
+          </span>
+        )}
       </div>
 
       {showPromptTweak && (
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 space-y-2 animate-fade-up">
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             rows={3}
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            className="field"
           />
           <button
             onClick={regenerate}
             disabled={busy}
-            className="rounded-md bg-brand-600 text-white px-3 py-1.5 text-sm hover:bg-brand-700 disabled:opacity-60"
+            className="btn-primary !px-3 !py-1.5 !text-xs"
           >
             {busy ? 'Queued…' : 'Generate new variants'}
           </button>

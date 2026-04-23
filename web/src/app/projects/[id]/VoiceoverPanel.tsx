@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, type Voice, type VoiceSettings } from '@/lib/api';
+import { VoicePreviewCard } from '@/components/VoicePreviewCard';
 
 export function VoiceoverPanel({
   projectId,
@@ -17,13 +18,27 @@ export function VoiceoverPanel({
   onSaved: () => Promise<void> | void;
 }) {
   const [voiceId, setVoiceId] = useState(currentVoiceId || '');
+  const [query, setQuery] = useState('');
   const [stability, setStability] = useState(currentSettings.stability ?? 0.5);
   const [similarity, setSimilarity] = useState(currentSettings.similarityBoost ?? 0.75);
   const [speed, setSpeed] = useState(currentSettings.speed ?? 1.0);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { setVoiceId(currentVoiceId || ''); }, [currentVoiceId]);
+  useEffect(() => {
+    setVoiceId(currentVoiceId || '');
+  }, [currentVoiceId]);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return voices;
+    const q = query.toLowerCase();
+    return voices.filter(
+      (v) =>
+        v.name.toLowerCase().includes(q) ||
+        v.category?.toLowerCase().includes(q) ||
+        Object.values(v.labels || {}).some((l) => l?.toLowerCase().includes(q))
+    );
+  }, [voices, query]);
 
   async function save() {
     setSaving(true);
@@ -45,30 +60,50 @@ export function VoiceoverPanel({
     }
   }
 
-  const currentVoice = voices.find((v) => v.voiceId === voiceId);
-
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
-      <h3 className="font-medium mb-3">Voiceover</h3>
-      <label className="block text-xs text-slate-600">Voice</label>
-      <select
-        value={voiceId}
-        onChange={(e) => setVoiceId(e.target.value)}
-        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 bg-white text-sm"
-      >
-        <option value="">— Select —</option>
-        {voices.map((v) => (
-          <option key={v.voiceId} value={v.voiceId}>
-            {v.name}
-          </option>
-        ))}
-      </select>
-      {currentVoice?.previewUrl && (
-        // eslint-disable-next-line jsx-a11y/media-has-caption
-        <audio controls src={currentVoice.previewUrl} className="mt-2 w-full" />
+    <div className="glass-panel animate-fade-up">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-medium text-white">Voiceover</h3>
+        <span className="text-[11px] text-ink-200/70">
+          {voices.length} voice{voices.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      <input
+        placeholder="Search voices…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        className="field mb-3"
+      />
+
+      {voices.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-white/10 p-6 text-center text-xs text-ink-200/70">
+          No voices available. Check ELEVENLABS_API_KEY.
+        </div>
+      ) : (
+        <div className="grid gap-2 max-h-[420px] overflow-y-auto pr-1">
+          {filtered.map((v, i) => (
+            <div
+              key={v.voiceId}
+              className="animate-fade-up"
+              style={{ animationDelay: `${Math.min(i, 6) * 40}ms` }}
+            >
+              <VoicePreviewCard
+                voice={v}
+                selected={voiceId === v.voiceId}
+                onSelect={() => setVoiceId(v.voiceId)}
+              />
+            </div>
+          ))}
+          {filtered.length === 0 && (
+            <div className="text-xs text-ink-200/70 text-center py-6">
+              No voices match &ldquo;{query}&rdquo;.
+            </div>
+          )}
+        </div>
       )}
 
-      <div className="mt-4 space-y-3">
+      <div className="mt-5 space-y-3">
         <Slider label="Stability" value={stability} onChange={setStability} min={0} max={1} step={0.05} />
         <Slider label="Similarity" value={similarity} onChange={setSimilarity} min={0} max={1} step={0.05} />
         <Slider label="Speed" value={speed} onChange={setSpeed} min={0.5} max={2} step={0.05} />
@@ -76,8 +111,8 @@ export function VoiceoverPanel({
 
       <button
         onClick={save}
-        disabled={saving}
-        className="mt-4 w-full rounded-md bg-brand-600 text-white px-3 py-1.5 text-sm hover:bg-brand-700 disabled:opacity-60"
+        disabled={saving || !voiceId}
+        className="btn-primary mt-5 w-full"
       >
         {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save voice settings'}
       </button>
@@ -85,10 +120,29 @@ export function VoiceoverPanel({
   );
 }
 
-function Slider({ label, value, onChange, min, max, step }: { label: string; value: number; onChange: (v: number) => void; min: number; max: number; step: number }) {
+function Slider({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  step: number;
+}) {
   return (
     <label className="block">
-      <span className="text-xs text-slate-600">{label}: {value.toFixed(2)}</span>
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] uppercase tracking-wider text-ink-200/80">
+          {label}
+        </span>
+        <span className="text-xs text-white tabular-nums">{value.toFixed(2)}</span>
+      </div>
       <input
         type="range"
         min={min}
@@ -96,7 +150,7 @@ function Slider({ label, value, onChange, min, max, step }: { label: string; val
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="w-full"
+        className="w-full mt-1.5"
       />
     </label>
   );

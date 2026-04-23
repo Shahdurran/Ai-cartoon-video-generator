@@ -98,34 +98,42 @@ export function StatusStream({ project }: { project: Project }) {
   return (
     <div>
       {error && (
-        <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <div className="mb-4 rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200 animate-fade-in">
           {error}
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-4 py-3 text-left">Scene</th>
+      <div className="glass overflow-hidden rounded-2xl">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="text-[11px] uppercase tracking-wider text-ink-200/70 border-b border-white/10 bg-white/[0.02]">
+              <th className="px-4 py-3 text-left font-medium">Scene</th>
               {PHASES.map((p) => (
-                <th key={p.key} className="px-4 py-3 text-left">{p.label}</th>
+                <th key={p.key} className="px-4 py-3 text-left font-medium">
+                  {p.label}
+                </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
-            {orderedScenes.map((scene) => {
+          <tbody>
+            {orderedScenes.map((scene, i) => {
               const st = sceneMap[scene.id] || { image: 'idle', voice: 'idle', video: 'idle' };
               return (
-                <tr key={scene.id}>
-                  <td className="px-4 py-3">
-                    <div className="font-medium">Scene {scene.sceneIndex + 1}</div>
-                    <div className="text-xs text-slate-500 truncate max-w-[20rem]">
+                <tr
+                  key={scene.id}
+                  className="border-b border-white/5 last:border-none animate-fade-up"
+                  style={{ animationDelay: `${Math.min(i, 6) * 40}ms` }}
+                >
+                  <td className="px-4 py-3 align-top">
+                    <div className="font-medium text-white">
+                      Scene {scene.sceneIndex + 1}
+                    </div>
+                    <div className="text-[11px] text-ink-200/70 truncate max-w-[20rem]">
                       {scene.voiceoverText}
                     </div>
                   </td>
                   {PHASES.map((p) => (
-                    <td key={p.key} className="px-4 py-3">
+                    <td key={p.key} className="px-4 py-3 align-top">
                       <PhasePill value={(st as any)[p.key] as PhaseState} />
                     </td>
                   ))}
@@ -136,10 +144,10 @@ export function StatusStream({ project }: { project: Project }) {
         </table>
       </div>
 
-      <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4 flex items-center justify-between">
+      <div className="mt-6 glass-panel flex items-center justify-between animate-fade-up">
         <div>
-          <div className="text-sm font-medium">Final assembly</div>
-          <div className="text-xs text-slate-500">
+          <div className="text-sm font-medium text-white">Final assembly</div>
+          <div className="text-[11px] text-ink-200/70">
             Concatenates scenes, burns subtitles, mixes music, renders MP4.
           </div>
         </div>
@@ -151,15 +159,18 @@ export function StatusStream({ project }: { project: Project }) {
 
 function PhasePill({ value }: { value: PhaseState }) {
   const classes: Record<PhaseState, string> = {
-    idle: 'bg-slate-100 text-slate-600',
-    queued: 'bg-indigo-100 text-indigo-700',
-    polling: 'bg-indigo-100 text-indigo-700',
-    running: 'bg-amber-100 text-amber-700',
-    complete: 'bg-emerald-100 text-emerald-700',
-    failed: 'bg-rose-100 text-rose-700',
+    idle: 'bg-white/10 text-ink-100 border border-white/10',
+    queued: 'bg-indigo-400/15 text-indigo-200 border border-indigo-400/30',
+    polling: 'bg-indigo-400/15 text-indigo-200 border border-indigo-400/30',
+    running:
+      'bg-brand-400/15 text-brand-100 border border-brand-400/30 animate-glow',
+    complete:
+      'bg-emerald-400/15 text-emerald-200 border border-emerald-400/30',
+    failed: 'bg-rose-500/15 text-rose-200 border border-rose-500/30',
   };
   return (
-    <span className={`inline-block text-xs px-2 py-0.5 rounded-full ${classes[value]}`}>
+    <span className={`pill ${classes[value]}`}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
       {value}
     </span>
   );

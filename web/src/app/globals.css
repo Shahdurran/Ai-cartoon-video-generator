@@ -3,7 +3,11 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
+
+  --brand-amber: #FFA846;
+  --brand-pink: #FF4689;
+  --brand-ink: #1C030D;
 }
 
 html,
@@ -12,5 +16,252 @@ body {
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply text-ink-50 antialiased;
+  background-color: var(--brand-ink);
+  font-feature-settings: 'ss01', 'cv11';
+}
+
+/* Ambient iso-glass backdrop: three soft blobs that slowly drift behind everything. */
+.app-shell {
+  position: relative;
+  min-height: 100vh;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.app-shell::before,
+.app-shell::after,
+.app-shell > .blob-mid {
+  content: '';
+  position: fixed;
+  z-index: -1;
+  filter: blur(90px);
+  opacity: 0.55;
+  pointer-events: none;
+  border-radius: 9999px;
+  will-change: transform;
+}
+
+.app-shell::before {
+  width: 520px;
+  height: 520px;
+  top: -120px;
+  left: -120px;
+  background: radial-gradient(circle at center, #FFA846 0%, transparent 70%);
+  animation: float 14s ease-in-out infinite;
+}
+
+.app-shell::after {
+  width: 640px;
+  height: 640px;
+  bottom: -200px;
+  right: -160px;
+  background: radial-gradient(circle at center, #FF4689 0%, transparent 70%);
+  animation: float 18s ease-in-out infinite reverse;
+}
+
+.app-shell > .blob-mid {
+  width: 420px;
+  height: 420px;
+  top: 35%;
+  left: 45%;
+  background: radial-gradient(circle at center, #FF6A5C 0%, transparent 70%);
+  opacity: 0.35;
+  animation: float 22s ease-in-out infinite;
+}
+
+/* ---------- Glass surfaces ---------- */
+@layer components {
+  /* Standard iso-glass card -- soft translucent white on the dark plum ink. */
+  .glass {
+    @apply relative rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 20px 50px -25px rgba(0, 0, 0, 0.6);
+  }
+
+  .glass-strong {
+    @apply relative rounded-2xl border border-white/15 bg-white/[0.07] backdrop-blur-2xl;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      0 30px 60px -25px rgba(0, 0, 0, 0.7);
+  }
+
+  .glass-panel {
+    @apply glass p-5;
+  }
+
+  /* Buttons ------------------------------------------------------- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed select-none;
+  }
+
+  .btn-primary {
+    @apply btn text-white;
+    background-image: linear-gradient(135deg, #FFA846 0%, #FF4689 100%);
+    box-shadow:
+      0 8px 20px -8px rgba(255, 70, 137, 0.6),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow:
+      0 14px 28px -10px rgba(255, 70, 137, 0.7),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  }
+
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .btn-ghost {
+    @apply btn border border-white/15 bg-white/[0.04] text-ink-50 hover:bg-white/[0.08] hover:border-white/25;
+  }
+
+  .btn-subtle {
+    @apply btn text-ink-100/80 hover:bg-white/[0.06] hover:text-white;
+  }
+
+  /* Inputs -------------------------------------------------------- */
+  .field {
+    @apply w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-ink-200/60 outline-none transition;
+  }
+
+  .field:focus {
+    @apply border-brand-400/70 bg-white/[0.07];
+    box-shadow: 0 0 0 3px rgba(255, 168, 70, 0.15);
+  }
+
+  select.field option {
+    background-color: #1C030D;
+    color: #fff;
+  }
+
+  /* Label */
+  .label {
+    @apply block text-xs uppercase tracking-wider text-ink-200/80;
+  }
+
+  /* Subtle divider line */
+  .hairline {
+    @apply h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent;
+  }
+
+  /* Status pill base */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium;
+  }
+}
+
+/* ---------- Utilities ---------- */
+@layer utilities {
+  .text-gradient {
+    background-image: linear-gradient(135deg, #FFA846 0%, #FF4689 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .border-gradient {
+    border: 1px solid transparent;
+    background-image:
+      linear-gradient(rgba(28, 3, 13, 0.8), rgba(28, 3, 13, 0.8)),
+      linear-gradient(135deg, #FFA846, #FF4689);
+    background-origin: border-box;
+    background-clip: padding-box, border-box;
+  }
+
+  /* Shimmer skeletons */
+  .shimmer {
+    background-image: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.04) 0%,
+      rgba(255, 255, 255, 0.12) 50%,
+      rgba(255, 255, 255, 0.04) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2.4s linear infinite;
+  }
+
+  .stagger-1 { animation-delay: 60ms; }
+  .stagger-2 { animation-delay: 120ms; }
+  .stagger-3 { animation-delay: 180ms; }
+  .stagger-4 { animation-delay: 240ms; }
+  .stagger-5 { animation-delay: 300ms; }
+}
+
+/* Native inputs that we can't fully restyle still deserve a decent look. */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  outline: none;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #FFA846, #FF4689);
+  box-shadow: 0 2px 6px rgba(255, 70, 137, 0.5);
+  cursor: pointer;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #FFA846, #FF4689);
+  border: 2px solid #fff;
+  cursor: pointer;
+}
+
+input[type='color'] {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  padding: 2px;
+}
+
+/* Scrollbars -- keep them thin and on-brand */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 70, 137, 0.45);
+}
+
+/* Audio element dark styling */
+audio {
+  width: 100%;
+  filter: invert(0.9) hue-rotate(180deg);
+  border-radius: 9999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell::before,
+  .app-shell::after,
+  .app-shell > .blob-mid,
+  .animate-float,
+  .animate-shimmer,
+  .animate-glow,
+  .animate-fade-up,
+  .animate-fade-in,
+  .animate-wave {
+    animation: none !important;
+  }
 }

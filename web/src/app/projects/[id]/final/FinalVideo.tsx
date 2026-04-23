@@ -17,13 +17,11 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
     } catch (_) { /* ignore */ }
   }
 
-  // If we were redirected here but the signed URL is stale, refetch.
   useEffect(() => {
     if (project.status === 'complete' && !project.outputSignedUrl) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Poll while hooks are being generated.
   useEffect(() => {
     const incomplete = project.hookVariants.filter((h) => h.status === 'pending');
     if (incomplete.length === 0) return;
@@ -50,8 +48,8 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
 
   if (!project.outputSignedUrl) {
     return (
-      <div className="rounded-xl border-2 border-dashed border-slate-200 p-12 text-center">
-        <div className="text-sm text-slate-600">
+      <div className="glass rounded-2xl p-12 text-center animate-fade-up">
+        <div className="text-sm text-ink-100/80">
           The final video isn&apos;t ready yet. If this page stays empty, the signed URL may have expired — try refreshing.
         </div>
       </div>
@@ -60,8 +58,8 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
 
   return (
     <div className="space-y-10">
-      <section>
-        <div className="rounded-xl border border-slate-200 bg-black overflow-hidden">
+      <section className="animate-fade-up">
+        <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-black shadow-glass-strong">
           <video
             src={project.outputSignedUrl}
             controls
@@ -72,78 +70,78 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
           <a
             href={project.outputSignedUrl}
             download={`${project.id}.mp4`}
-            className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-medium hover:bg-brand-700"
+            className="btn-primary"
           >
             Download MP4
           </a>
-          <button
-            onClick={refresh}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm hover:bg-slate-50"
-          >
+          <button onClick={refresh} className="btn-ghost">
             Refresh URL
           </button>
         </div>
       </section>
 
-      <section>
+      <section className="animate-fade-up stagger-1">
         <div className="flex items-end justify-between mb-4">
           <div>
-            <h2 className="text-xl font-semibold">Hook variants</h2>
-            <p className="text-sm text-slate-500">
+            <h2 className="text-2xl font-semibold text-white">
+              Hook <span className="text-gradient">variants</span>
+            </h2>
+            <p className="text-sm text-ink-100/70">
               Rewrite the opening into N different hooks spliced onto the front of the video.
             </p>
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5 mb-6">
+        <div className="glass-panel mb-6">
           <div className="grid grid-cols-3 gap-4">
             <label className="block">
-              <span className="text-xs text-slate-600">Hook duration (seconds)</span>
+              <span className="label">Hook duration (seconds)</span>
               <input
                 type="number"
                 min={5}
                 max={30}
                 value={hookDuration}
                 onChange={(e) => setHookDuration(parseInt(e.target.value || '10', 10))}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                className="field mt-1.5"
               />
             </label>
             <label className="block">
-              <span className="text-xs text-slate-600">Number of variants</span>
+              <span className="label">Number of variants</span>
               <input
                 type="number"
                 min={1}
                 max={5}
                 value={variantCount}
                 onChange={(e) => setVariantCount(parseInt(e.target.value || '3', 10))}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                className="field mt-1.5"
               />
             </label>
             <div className="flex items-end">
               <button
                 onClick={generateHooks}
                 disabled={hookBusy}
-                className="w-full rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-60"
+                className="btn-primary w-full"
               >
                 {hookBusy ? 'Queuing…' : 'Generate hooks'}
               </button>
             </div>
           </div>
           {hookError && (
-            <div className="mt-3 text-sm text-rose-600">{hookError}</div>
+            <div className="mt-3 text-sm text-rose-300">{hookError}</div>
           )}
         </div>
 
         {project.hookVariants.length === 0 ? (
-          <div className="rounded-xl border-2 border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
+          <div className="glass rounded-2xl p-8 text-center text-sm text-ink-100/70">
             No hook variants yet.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {project.hookVariants.map((h) => (
+            {project.hookVariants.map((h, i) => (
               <div
                 key={h.id}
-                className="rounded-xl border border-slate-200 bg-white overflow-hidden flex flex-col"
+                className="glass rounded-2xl overflow-hidden flex flex-col animate-fade-up"
+                style={{ animationDelay: `${Math.min(i, 6) * 40}ms` }}
               >
                 {h.outputSignedUrl ? (
                   <video
@@ -152,20 +150,28 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
                     className="w-full aspect-video bg-black"
                   />
                 ) : (
-                  <div className="w-full aspect-video bg-slate-100 flex items-center justify-center text-sm text-slate-500">
-                    {h.status === 'failed' ? `Failed: ${h.errorMessage}` : 'Generating…'}
+                  <div className="w-full aspect-video shimmer flex items-center justify-center text-sm text-ink-100/70">
+                    {h.status === 'failed' ? (
+                      <span className="text-rose-300">
+                        Failed: {h.errorMessage}
+                      </span>
+                    ) : (
+                      'Generating…'
+                    )}
                   </div>
                 )}
                 <div className="p-4 flex-1 flex flex-col">
-                  <div className="text-xs uppercase tracking-wide text-slate-500">
+                  <div className="text-[11px] uppercase tracking-wider text-brand-100/80 font-medium">
                     Variant {h.variantIndex + 1}
                   </div>
-                  <p className="text-sm text-slate-700 mt-2 flex-1">{h.hookScript}</p>
+                  <p className="text-sm text-ink-50 mt-2 flex-1 leading-relaxed">
+                    {h.hookScript}
+                  </p>
                   {h.outputSignedUrl && (
                     <a
                       href={h.outputSignedUrl}
                       download={`${project.id}-hook-${h.variantIndex + 1}.mp4`}
-                      className="mt-3 inline-block rounded-md border border-slate-200 px-3 py-1.5 text-xs hover:bg-slate-50 self-start"
+                      className="btn-ghost mt-3 !px-3 !py-1.5 !text-xs self-start"
                     >
                       Download
                     </a>
