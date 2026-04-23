@@ -31,8 +31,8 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
-# Standalone output bundles only what's needed.
-COPY --from=builder /app/public ./public
+# Standalone output bundles only what's needed. No web/public dir in this
+# project, so skip the optional COPY --from=builder /app/public step.
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
