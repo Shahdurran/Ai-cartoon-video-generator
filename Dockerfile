@@ -31,9 +31,12 @@ COPY package.json package-lock.json* ./
 COPY server-new.js ./
 COPY src ./src
 COPY public ./public
-COPY effects ./effects
 COPY scripts ./scripts
 COPY storage ./storage
+
+# effects/ holds gitignored binary overlays that aren't used by the cartoon
+# pipeline; mkdir so legacy code that assumes the dir exists doesn't crash.
+RUN mkdir -p ./effects
 
 EXPOSE 3000
 
