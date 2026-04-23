@@ -348,6 +348,173 @@ Return ONLY the script text - no titles, no labels, no meta-commentary.`;
   }
 
   /**
+   * Generate a structured N-scene script as JSON. Used by the cartoon
+   * generator pipeline to produce {imagePrompt, voiceoverText, durationSeconds}
+   * per scene.
+   *
+   * @param {string} input - Topic string OR full example script to rewrite
+   * @param {object} options
+   * @param {number} options.sceneCount - Number of scenes to produce
+   * @param {string} [options.styleId] - Style hint (informs prompt tone only;
+   *     Flux suffix is applied downstream)
+   * @param {number} [options.totalDurationSeconds] - Soft target; scenes are
+   *     divided roughly evenly
+   * @param {string} [options.language='English']
+   * @param {string} [options.tone='dramatic']
+   * @param {string} [options.mode='topic'] - 'topic' or 'rewrite' (source_script)
+   * @returns {Promise<{scenes: Array<{sceneIndex:number, imagePrompt:string, voiceoverText:string, durationSeconds:number}>}>}
+   */
+  async generateSceneScript(input, options = {}) {
+    const {
+      sceneCount,
+      styleId = null,
+      totalDurationSeconds = null,
+      language = 'English',
+      tone = 'dramatic',
+      mode = 'topic',
+    } = options;
+
+    if (!input || typeof input !== 'string') {
+      throw new Error('input (topic or source script) is required');
+    }
+    if (!sceneCount || sceneCount < 1) {
+      throw new Error('sceneCount must be >= 1');
+    }
+
+    const perSceneSeconds = totalDurationSeconds
+      ? Math.max(2, Math.round(totalDurationSeconds / sceneCount))
+      : 5;
+
+    const systemPrompt = `You are an expert short-form video scriptwriter AND visual director for AI-generated cartoons. You produce scene-by-scene breakdowns that pair a detailed cartoon image prompt with a short voiceover line.
+
+HARD RULES:
+1. Output VALID JSON ONLY. No prose, no markdown, no code fences.
+2. Exactly ${sceneCount} scenes, in order, sceneIndex starting at 0.
+3. Each scene must have: sceneIndex (int), imagePrompt (string), voiceoverText (string), durationSeconds (number).
+4. voiceoverText must be in ${language}. Around ${Math.round(perSceneSeconds * 2.4)} words per scene (so it fits ~${perSceneSeconds}s at normal speaking pace).
+5. imagePrompt should be in English regardless of voiceover language -- Flux responds best to English. Describe the scene concretely: subject, action, setting, mood, camera framing. 20-60 words. Do NOT include any style descriptors ("cartoon", "3D", "anime") -- those are applied downstream via a style preset.
+6. durationSeconds should be a reasonable integer in the 3-8 range that matches voiceover length. Sum roughly equals ${totalDurationSeconds || sceneCount * perSceneSeconds}.
+7. Tone: ${tone}. The opening scene should hook the viewer immediately.
+
+OUTPUT SHAPE (exact keys, no extras):
+{
+  "scenes": [
+    { "sceneIndex": 0, "imagePrompt": "...", "voiceoverText": "...", "durationSeconds": 5 }
+  ]
+}`;
+
+    const userPrompt = mode === 'rewrite'
+      ? `Rewrite the following script into ${sceneCount} scenes. Keep the story and key beats; split it into scenes that flow visually.\n\nSOURCE SCRIPT:\n${input}`
+      : `Topic: "${input}"\n\nCreate a ${sceneCount}-scene cartoon breakdown.${styleId ? ` Style hint: ${styleId}.` : ''}`;
+
+    const maxAttempts = 2;
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        console.log(`🎬 Generating ${sceneCount}-scene script (attempt ${attempt}/${maxAttempts})...`);
+        const message = await this.client.messages.create({
+          model: this.config.model,
+          max_tokens: Math.max(this.config.maxTokens, 2048),
+          temperature: attempt === 1 ? 0.7 : 0.4, // tighten on retry
+          system: attempt === 1
+            ? systemPrompt
+            : systemPrompt + '\n\nPREVIOUS ATTEMPT PRODUCED INVALID JSON. Respond with pure JSON only.',
+          messages: [{ role: 'user', content: userPrompt }],
+        });
+
+        let text = message.content[0].text.trim();
+        // Strip accidental code fences.
+        if (text.startsWith('```')) {
+          text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+        }
+
+        const parsed = JSON.parse(text);
+        if (!parsed.scenes || !Array.isArray(parsed.scenes)) {
+          throw new Error('Response missing "scenes" array');
+        }
+        if (parsed.scenes.length !== sceneCount) {
+          throw new Error(`Expected ${sceneCount} scenes, got ${parsed.scenes.length}`);
+        }
+
+        const scenes = parsed.scenes.map((s, i) => ({
+          sceneIndex: Number.isInteger(s.sceneIndex) ? s.sceneIndex : i,
+          imagePrompt: String(s.imagePrompt || '').trim(),
+          voiceoverText: String(s.voiceoverText || '').trim(),
+          durationSeconds: Number(s.durationSeconds) || perSceneSeconds,
+        }));
+
+        for (const s of scenes) {
+          if (!s.imagePrompt || !s.voiceoverText) {
+            throw new Error(`Scene ${s.sceneIndex} is missing imagePrompt or voiceoverText`);
+          }
+        }
+
+        console.log(`✅ Scene script parsed (${scenes.length} scenes)`);
+        return {
+          scenes,
+          metadata: {
+            model: this.config.model,
+            inputTokens: message.usage.input_tokens,
+            outputTokens: message.usage.output_tokens,
+            attempt,
+          },
+        };
+      } catch (err) {
+        lastError = err;
+        console.warn(`⚠️  Scene script parse failed (attempt ${attempt}): ${err.message}`);
+      }
+    }
+
+    throw new Error(`generateSceneScript failed: ${lastError?.message || 'unknown error'}`);
+  }
+
+  /**
+   * Generate N alternative hook scripts for the opening of an existing
+   * cartoon. Returns { hooks: [{ variantIndex, script }] }.
+   */
+  async generateHookVariants({ originalOpening, topic, variantCount = 3, hookDurationSeconds = 10, language = 'English' }) {
+    const targetWords = Math.round(hookDurationSeconds * 2.5);
+    const systemPrompt = `You rewrite the opening seconds of a cartoon video into MULTIPLE distinct hook variants designed to grab viewer attention in the first ${hookDurationSeconds} seconds.
+
+RULES:
+1. Output VALID JSON ONLY: { "hooks": [ { "variantIndex": 0, "script": "..." } ] }.
+2. Exactly ${variantCount} hooks, each ~${targetWords} words (±20%) in ${language}.
+3. Each hook must be DIFFERENT in angle: try (a) shocking statistic / fact, (b) rhetorical question, (c) bold claim or challenge.
+4. Hooks must flow naturally into the rest of the story; do not reveal the conclusion.`;
+
+    const userPrompt = `Topic: ${topic || '(unknown)'}\n\nORIGINAL OPENING:\n${originalOpening}\n\nProduce ${variantCount} hook rewrites.`;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const message = await this.client.messages.create({
+          model: this.config.model,
+          max_tokens: 1024,
+          temperature: attempt === 1 ? 0.8 : 0.5,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+        });
+        let text = message.content[0].text.trim();
+        if (text.startsWith('```')) {
+          text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+        }
+        const parsed = JSON.parse(text);
+        if (!Array.isArray(parsed.hooks) || parsed.hooks.length !== variantCount) {
+          throw new Error('Invalid hooks shape');
+        }
+        return {
+          hooks: parsed.hooks.map((h, i) => ({
+            variantIndex: Number.isInteger(h.variantIndex) ? h.variantIndex : i,
+            script: String(h.script || '').trim(),
+          })),
+        };
+      } catch (err) {
+        if (attempt === 2) throw new Error(`Hook generation failed: ${err.message}`);
+      }
+    }
+  }
+
+  /**
    * Generate image prompts from a script
    * @param {string} script - The video script
    * @param {number} numberOfImages - Number of image prompts to generate

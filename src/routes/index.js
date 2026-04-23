@@ -9,10 +9,13 @@ const router = express.Router();
 // Import route modules
 const videoRoutes = require('./videoRoutes');
 const apiRoutes = require('./apiRoutes');
+const cartoonRoutes = require('./cartoonRoutes');
 
 // Mount routes
 router.use('/video', videoRoutes);  // Legacy video routes
 router.use('/v2', apiRoutes);       // New API v2 routes
+// AI Cartoon Generator routes: /api/styles, /api/projects, /api/voices, /api/music, etc.
+router.use('/', cartoonRoutes);
 
 // Health check endpoint
 router.get('/health', (req, res) => {

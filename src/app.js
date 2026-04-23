@@ -14,6 +14,8 @@ const routes = require('./routes');
 
 // Import queue setup
 const { setupProcessors } = require('./queues/setupProcessors');
+const { setupCartoonProcessors } = require('./queues/setupCartoonProcessors');
+const { runMigrations } = require('./db/migrate');
 
 // Initialize Express app
 const app = express();
@@ -100,6 +102,25 @@ app.use((req, res) => {
 
 // ===== Initialize Queue Processors =====
 setupProcessors();
+try {
+  setupCartoonProcessors();
+} catch (err) {
+  console.warn('⚠️  Cartoon processors not initialised:', err.message);
+}
+
+// ===== Optional: run migrations on startup (Railway) =====
+if (process.env.RUN_MIGRATIONS_ON_STARTUP === 'true' && process.env.DATABASE_URL) {
+  runMigrations({ silent: false }).catch((err) => {
+    console.error('❌ Startup migrations failed:', err.message);
+  });
+}
+
+// ===== Optional: seed styles + music tracks when requested =====
+if (process.env.RUN_SEED_ON_STARTUP === 'true' && process.env.DATABASE_URL) {
+  require('./db/seed').main().catch((err) => {
+    console.error('❌ Startup seed failed:', err.message);
+  });
+}
 
 // ===== Ensure Required Directories =====
 async function ensureDirectories() {
