@@ -33,6 +33,10 @@ test-output/
 
 # Output directories
 output/
+
+# Overlay effect videos (large binaries; keep locally, never commit)
+effects/
+
 video-bank/*.mp4
 video-bank/*.mov
 video-bank/*.avi
