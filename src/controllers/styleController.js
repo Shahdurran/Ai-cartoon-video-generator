@@ -12,15 +12,18 @@ const r2Service = require('../services/r2Service');
 async function hydrate(style) {
   if (!style) return style;
   let thumbnailUrl = null;
-  if (style.thumbnailKey) {
-    if (r2Service.isConfigured()) {
-      try {
-        thumbnailUrl = await r2Service.getSignedDownloadUrl(style.thumbnailKey);
-      } catch (_) {
-        thumbnailUrl = r2Service.publicUrl(style.thumbnailKey);
+  if (style.thumbnailKey && r2Service.isConfigured()) {
+    // Style thumbnails are seeded by the user (not generated on demand), so
+    // they're often missing in fresh dev environments. Verify the object
+    // exists before handing the UI a URL that would 404.
+    try {
+      const present = await r2Service.exists(style.thumbnailKey);
+      if (present) {
+        thumbnailUrl =
+          r2Service.publicUrl(style.thumbnailKey) ||
+          (await r2Service.getSignedDownloadUrl(style.thumbnailKey).catch(() => null));
       }
-    } else {
-      // Local dev fallback: let the frontend know which key to look up later.
+    } catch (_) {
       thumbnailUrl = null;
     }
   }

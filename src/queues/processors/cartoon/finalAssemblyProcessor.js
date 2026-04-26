@@ -13,6 +13,7 @@ const styleRepo = require('../../../db/repositories/styleRepo');
 const musicTrackRepo = require('../../../db/repositories/musicTrackRepo');
 const r2Service = require('../../../services/r2Service');
 const pubsub = require('../../../services/pubsubService');
+const subtitlesProcessor = require('./projectSubtitlesProcessor');
 
 module.exports = async function finalAssemblyProcessor(job) {
   const { projectId } = job.data;
@@ -21,13 +22,45 @@ module.exports = async function finalAssemblyProcessor(job) {
   await pubsub.publish(projectId, { phase: 'assembly', status: 'running' });
 
   try {
-    const project = await projectRepo.findById(projectId);
+    let project = await projectRepo.findById(projectId);
     if (!project) throw new Error('Project not found');
 
     const scenes = await sceneRepo.findByProject(projectId);
     const missing = scenes.filter((s) => !s.videoKey);
     if (missing.length > 0) {
       throw new Error(`${missing.length} scene(s) still missing videoKey`);
+    }
+
+    // Build subtitles inline if they don't exist yet so we don't race the
+    // separate subtitles queue. Skipped silently if no scene has voice.
+    const hasAnyVoice = scenes.some((s) => !!s.voiceKey);
+    if (!project.subtitlesKey && hasAnyVoice) {
+      try {
+        console.log(`📝 [assembly] Generating subtitles for project ${projectId} (AssemblyAI)…`);
+        await subtitlesProcessor({ data: { projectId } });
+        // Reload so subtitlesKey is fresh on the project record.
+        project = await projectRepo.findById(projectId);
+        if (project.subtitlesKey) {
+          console.log(`✅ [assembly] Subtitles ready: ${project.subtitlesKey}`);
+        }
+      } catch (err) {
+        // Surface the failure as a visible warning on the project so the
+        // user can see *why* their captions are missing from the final
+        // cut (most often a missing/invalid ASSEMBLYAI_API_KEY).
+        const detail = err.message?.includes('Authentication')
+          ? 'Subtitles skipped: ASSEMBLYAI_API_KEY is missing or invalid. Add a valid key from https://www.assemblyai.com/app and re-assemble.'
+          : `Subtitles skipped: ${err.message}`;
+        console.warn(`⚠️  ${detail}`);
+        await pubsub.publish(projectId, {
+          phase: 'subtitles',
+          status: 'failed',
+          error: detail,
+        });
+      }
+    } else if (project.subtitlesKey) {
+      console.log(`📝 [assembly] Reusing existing subtitles: ${project.subtitlesKey}`);
+    } else if (!hasAnyVoice) {
+      console.log('📝 [assembly] No voice on any scene — skipping subtitles.');
     }
 
     const style = project.styleId ? await styleRepo.findById(project.styleId) : null;
@@ -40,6 +73,7 @@ module.exports = async function finalAssemblyProcessor(job) {
     const { tmpDir } = await assembler.assembleFinalVideo({
       projectId,
       sceneVideoKeys: scenes.map((s) => s.videoKey),
+      sceneVoiceKeys: scenes.map((s) => s.voiceKey || null),
       subtitlesKey: project.subtitlesKey || null,
       musicKey: music?.r2Key || null,
       musicVolume: Number(project.musicVolume) || 0.15,
@@ -58,8 +92,9 @@ module.exports = async function finalAssemblyProcessor(job) {
 
     return { outputKey };
   } catch (err) {
-    await projectRepo.updateStatus(projectId, 'failed', err.message);
-    await pubsub.publish(projectId, { phase: 'assembly', status: 'failed', error: err.message });
+    const detail = err.tmpDir ? `${err.message}\n(working dir kept for debugging: ${err.tmpDir})` : err.message;
+    await projectRepo.updateStatus(projectId, 'failed', detail);
+    await pubsub.publish(projectId, { phase: 'assembly', status: 'failed', error: detail });
     throw err;
   }
 };

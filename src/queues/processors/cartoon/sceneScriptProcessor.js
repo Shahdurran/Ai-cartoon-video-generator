@@ -6,16 +6,21 @@
  *     totalDurationSeconds, language, tone }
  *
  * On completion:
- *   1. Inserts scenes via sceneRepo.bulkCreate.
- *   2. Updates project.status to 'scripted'.
- *   3. Enqueues one cartoon-scene-images job per scene.
+ *   1. Inserts scenes via sceneRepo.bulkReplace (so re-runs cleanly
+ *      replace any prior scene set, e.g. on POST /regenerate-script).
+ *   2. Updates project.status to 'script-review'.
+ *
+ * Image generation is NOT auto-enqueued. The user must explicitly approve
+ * the script via POST /api/projects/:id/approve-script. This is the
+ * step that was missing from the original flow -- users were landing on
+ * a page where image generation had already failed without any chance
+ * to review or edit the AI-produced scenes first.
  */
 
 const ClaudeService = require('../../../services/claudeService');
 const sceneRepo = require('../../../db/repositories/sceneRepo');
 const projectRepo = require('../../../db/repositories/projectRepo');
 const pubsub = require('../../../services/pubsubService');
-const { queues } = require('../../cartoonQueues');
 
 const claude = new ClaudeService();
 
@@ -45,20 +50,17 @@ module.exports = async function sceneScriptProcessor(job) {
       mode,
     });
 
-    const inserted = await sceneRepo.bulkCreate(projectId, scenes);
-    await projectRepo.updateStatus(projectId, 'scripted');
+    // bulkReplace (not bulkCreate) so re-running script gen cleanly wipes
+    // any prior scene set -- needed for POST /regenerate-script.
+    const inserted = await sceneRepo.bulkReplace(projectId, scenes);
+    await projectRepo.updateStatus(projectId, 'script-review');
 
-    // Auto-queue image generation for every scene.
-    for (const s of inserted) {
-      await queues.sceneImages.add('generate-variants', {
-        projectId,
-        sceneId: s.id,
-        prompt: s.imagePrompt,
-        variantCount: 3,
-      });
-    }
-
-    await pubsub.publish(projectId, { phase: 'script', status: 'complete', sceneCount: inserted.length });
+    await pubsub.publish(projectId, {
+      phase: 'script',
+      status: 'complete',
+      sceneCount: inserted.length,
+      nextStep: 'script-review',
+    });
 
     return { sceneCount: inserted.length, scenes: inserted, metadata };
   } catch (err) {

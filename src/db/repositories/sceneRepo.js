@@ -10,7 +10,8 @@ const SELECT_COLUMNS = `
   duration_seconds AS "durationSeconds",
   selected_image_id AS "selectedImageId",
   voice_key AS "voiceKey", video_key AS "videoKey",
-  fal_request_id AS "falRequestId", status, error_message AS "errorMessage",
+  fal_request_id AS "falRequestId",
+  status, error_message AS "errorMessage", error_code AS "errorCode",
   created_at AS "createdAt"
 `;
 
@@ -29,6 +30,40 @@ async function bulkCreate(projectId, scenes) {
            duration_seconds = EXCLUDED.duration_seconds
          RETURNING ${SELECT_COLUMNS}`,
         [projectId, s.sceneIndex, s.imagePrompt, s.voiceoverText, s.durationSeconds]
+      );
+      inserted.push(rows[0]);
+    }
+    return inserted;
+  });
+}
+
+/**
+ * Wholesale replace the scene list for a project. Used by the script-review
+ * page when the user has reordered, edited, added, or deleted scenes.
+ *
+ * Done in a single transaction: delete every existing scene (and via FK
+ * cascade their scene_images), then insert the new list with re-numbered
+ * scene_index values starting at 0. Returns the freshly inserted rows.
+ *
+ * Caller should only invoke this while the project is in 'draft' or
+ * 'script-review' state -- replacing scenes mid-pipeline would orphan
+ * generated images / videos.
+ */
+async function bulkReplace(projectId, scenes) {
+  return tx(async (client) => {
+    await client.query(
+      `DELETE FROM scenes WHERE project_id = $1`,
+      [projectId]
+    );
+    const inserted = [];
+    for (let i = 0; i < scenes.length; i++) {
+      const s = scenes[i];
+      const { rows } = await client.query(
+        `INSERT INTO scenes
+           (project_id, scene_index, image_prompt, voiceover_text, duration_seconds)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING ${SELECT_COLUMNS}`,
+        [projectId, i, s.imagePrompt, s.voiceoverText, s.durationSeconds]
       );
       inserted.push(rows[0]);
     }
@@ -65,12 +100,17 @@ async function updateSelectedImage(sceneId, sceneImageId) {
   return rows[0] || null;
 }
 
-async function updateStatus(sceneId, status, errorMessage = null) {
+/**
+ * Update status with optional human-readable message and stable error code.
+ * Passing `null` for either clears that column. Stable codes:
+ *   content_policy | rate_limit | network | auth | quota | timeout | unknown
+ */
+async function updateStatus(sceneId, status, errorMessage = null, errorCode = null) {
   const { rows } = await query(
-    `UPDATE scenes SET status = $2, error_message = $3
+    `UPDATE scenes SET status = $2, error_message = $3, error_code = $4
      WHERE id = $1
      RETURNING ${SELECT_COLUMNS}`,
-    [sceneId, status, errorMessage]
+    [sceneId, status, errorMessage, errorCode]
   );
   return rows[0] || null;
 }
@@ -84,7 +124,8 @@ async function setFalRequestId(sceneId, requestId) {
 
 async function setVideoKey(sceneId, videoKey) {
   await query(
-    `UPDATE scenes SET video_key = $2, status = 'video-ready' WHERE id = $1`,
+    `UPDATE scenes SET video_key = $2, status = 'video-ready', error_message = NULL, error_code = NULL
+     WHERE id = $1`,
     [sceneId, videoKey]
   );
 }
@@ -110,6 +151,7 @@ async function deleteByProject(projectId) {
 
 module.exports = {
   bulkCreate,
+  bulkReplace,
   findByProject,
   findById,
   updateSelectedImage,

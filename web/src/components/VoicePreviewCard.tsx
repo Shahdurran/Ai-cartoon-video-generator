@@ -114,7 +114,7 @@ export function VoicePreviewCard({ voice, selected, onSelect }: Props) {
     <button
       type="button"
       onClick={onSelect}
-      className={`group relative text-left rounded-2xl p-4 transition-all duration-200 border overflow-hidden ${
+      className={`group relative text-left rounded-2xl p-4 transition-all duration-200 border overflow-visible ${
         selected
           ? 'border-brand-400/60 bg-white/[0.08]'
           : 'border-white/10 bg-white/[0.03] hover:border-white/25 hover:bg-white/[0.06]'
@@ -124,7 +124,8 @@ export function VoicePreviewCard({ voice, selected, onSelect }: Props) {
         <span className="pointer-events-none absolute inset-0 rounded-2xl ring-2 ring-brand-400/40 animate-fade-in" />
       )}
 
-      <div className="flex items-center gap-3">
+      {/* Row 1: play + text gets full width so labels are not clipped by WaveBars */}
+      <div className="flex items-start gap-3">
         <div
           onClick={togglePlay}
           role="button"
@@ -153,26 +154,30 @@ export function VoicePreviewCard({ voice, selected, onSelect }: Props) {
           )}
         </div>
 
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <div className="text-sm font-medium text-white truncate">
+        <div className="min-w-0 flex-1 text-left pr-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <div className="text-sm font-medium text-white break-words [overflow-wrap:anywhere]">
               {voice.name}
             </div>
             {selected && (
-              <span className="pill bg-brand-400/20 text-brand-100 border border-brand-400/30">
+              <span className="pill shrink-0 bg-brand-400/20 text-brand-100 border border-brand-400/30">
                 selected
               </span>
             )}
           </div>
           {labelBits.length > 0 && (
-            <div className="text-[11px] text-ink-200/70 truncate mt-0.5">
+            <div className="text-[11px] text-ink-200/70 mt-1 break-words [overflow-wrap:anywhere] leading-snug">
               {labelBits.join(' · ')}
             </div>
           )}
         </div>
-
-        {playing && <WaveBars />}
       </div>
+
+      {playing && (
+        <div className="mt-3 flex justify-center" aria-hidden>
+          <WaveBars />
+        </div>
+      )}
 
       {/* progress bar */}
       <div className="mt-3 h-1 rounded-full bg-white/5 overflow-hidden">

@@ -13,10 +13,16 @@
  *   PATCH  /api/projects/:id
  *   DELETE /api/projects/:id
  *
+ *   PUT    /api/projects/:id/scenes                            (script-review bulk replace)
+ *   POST   /api/projects/:id/regenerate-script
+ *   POST   /api/projects/:id/approve-script
+ *
  *   PATCH  /api/projects/:id/scenes/:sceneId/select-image
  *   POST   /api/projects/:id/scenes/:sceneId/regenerate-image
  *   POST   /api/projects/:id/scenes/:sceneId/upload-image      (multipart)
+ *   POST   /api/projects/:id/subtitle-font                     (multipart .ttf/.otf)
  *   POST   /api/projects/:id/scenes/:sceneId/voice
+ *   POST   /api/projects/:id/scenes/:sceneId/regenerate-video
  *
  *   POST   /api/projects/:id/subtitles
  *   POST   /api/projects/:id/generate
@@ -47,6 +53,10 @@ router.get('/projects/:id', projectController.get);
 router.patch('/projects/:id', projectController.patch);
 router.delete('/projects/:id', projectController.remove);
 
+router.put('/projects/:id/scenes', projectController.replaceScenes);
+router.post('/projects/:id/regenerate-script', projectController.regenerateScript);
+router.post('/projects/:id/approve-script', projectController.approveScript);
+
 router.patch(
   '/projects/:id/scenes/:sceneId/select-image',
   projectController.selectImage
@@ -61,12 +71,22 @@ router.post(
   projectController.uploadImage
 );
 router.post(
+  '/projects/:id/subtitle-font',
+  projectController.fontUpload.single('font'),
+  projectController.uploadSubtitleFont
+);
+router.post(
   '/projects/:id/scenes/:sceneId/voice',
   projectController.generateSceneVoice
+);
+router.post(
+  '/projects/:id/scenes/:sceneId/regenerate-video',
+  projectController.regenerateSceneVideo
 );
 
 router.post('/projects/:id/subtitles', projectController.regenerateSubtitles);
 router.post('/projects/:id/generate', projectController.generate);
+router.post('/projects/:id/approve-videos', projectController.approveVideos);
 router.post('/projects/:id/hooks', projectController.generateHooks);
 
 router.get('/projects/:id/status/stream', projectController.statusStream);

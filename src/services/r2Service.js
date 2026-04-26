@@ -34,12 +34,23 @@ const {
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const {
-  R2_ENDPOINT,
   R2_ACCESS_KEY_ID,
   R2_SECRET_ACCESS_KEY,
-  R2_BUCKET_NAME,
   R2_PUBLIC_BASE_URL,
 } = process.env;
+
+// Bucket name -- accept both R2_BUCKET_NAME (legacy) and R2_BUCKET (Cloudflare's
+// own dashboard naming) so users don't have to maintain two aliases.
+const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || process.env.R2_BUCKET;
+
+// Endpoint -- accept either R2_ENDPOINT (full URL) or R2_ACCOUNT_ID. The
+// latter is what Cloudflare shows on the bucket page; we derive the
+// canonical S3 endpoint from it.
+const R2_ENDPOINT =
+  process.env.R2_ENDPOINT ||
+  (process.env.R2_ACCOUNT_ID
+    ? `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+    : null);
 
 let client = null;
 
@@ -47,7 +58,7 @@ function getClient() {
   if (client) return client;
   if (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
     throw new Error(
-      'R2 is not configured. Set R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME.'
+      'R2 is not configured. Set R2_ACCOUNT_ID (or R2_ENDPOINT), R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET (or R2_BUCKET_NAME).'
     );
   }
   client = new S3Client({
@@ -62,7 +73,9 @@ function getClient() {
 }
 
 function bucketName() {
-  if (!R2_BUCKET_NAME) throw new Error('R2_BUCKET_NAME is not configured');
+  if (!R2_BUCKET_NAME) {
+    throw new Error('R2 bucket is not configured: set R2_BUCKET (or R2_BUCKET_NAME)');
+  }
   return R2_BUCKET_NAME;
 }
 

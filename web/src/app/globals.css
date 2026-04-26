@@ -252,6 +252,88 @@ audio {
   border-radius: 9999px;
 }
 
+/* Subtitle panel preview — motion is UI-only (final burn-in is static). */
+.subtitle-preview-text {
+  will-change: transform, opacity, filter;
+}
+
+@keyframes subtitle-preview-fade {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes subtitle-preview-slide-up {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: translateY(12px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes subtitle-preview-slide-down {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: translateY(-12px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes subtitle-preview-pop {
+  0%,
+  100% {
+    opacity: 0.65;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes subtitle-preview-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
+  }
+  50% {
+    filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.45))
+      drop-shadow(0 0 4px rgba(0, 0, 0, 0.85));
+  }
+}
+
+.subtitle-preview-anim-fade {
+  animation: subtitle-preview-fade 2.8s ease-in-out infinite;
+}
+
+.subtitle-preview-anim-slide-up {
+  animation: subtitle-preview-slide-up 2.6s ease-in-out infinite;
+}
+
+.subtitle-preview-anim-slide-down {
+  animation: subtitle-preview-slide-down 2.6s ease-in-out infinite;
+}
+
+.subtitle-preview-anim-pop {
+  animation: subtitle-preview-pop 2.4s ease-in-out infinite;
+}
+
+.subtitle-preview-anim-soft-glow {
+  animation: subtitle-preview-glow 3s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-shell::before,
   .app-shell::after,
@@ -261,7 +343,16 @@ audio {
   .animate-glow,
   .animate-fade-up,
   .animate-fade-in,
-  .animate-wave {
+  .animate-wave,
+  .subtitle-preview-anim-fade,
+  .subtitle-preview-anim-slide-up,
+  .subtitle-preview-anim-slide-down,
+  .subtitle-preview-anim-pop,
+  .subtitle-preview-anim-soft-glow {
     animation: none !important;
+  }
+
+  .subtitle-preview-text {
+    will-change: auto;
   }
 }

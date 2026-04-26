@@ -7,16 +7,23 @@
  *   GET    /:id                                                 -- hydrated project (+ scenes, images, hooks)
  *   PATCH  /:id                                                 -- update settings
  *   DELETE /:id                                                 -- cascade delete + R2 cleanup
+ *
+ *   PUT    /:id/scenes                                          -- bulk replace scene list (script-review)
+ *   POST   /:id/regenerate-script                               -- re-run Claude script gen
+ *   POST   /:id/approve-script                                  -- approve scenes; enqueue image jobs
+ *
  *   PATCH  /:id/scenes/:sceneId/select-image                    -- choose a variant
  *   POST   /:id/scenes/:sceneId/regenerate-image                -- regenerate variants (optional new prompt)
  *   POST   /:id/scenes/:sceneId/upload-image                    -- multipart custom image
  *   POST   /:id/scenes/:sceneId/voice                           -- (re)generate voiceover for one scene
+ *   POST   /:id/scenes/:sceneId/regenerate-video                -- re-run Seedance for one scene
  *   POST   /:id/subtitles                                       -- (re)generate project-wide subtitles
  *   POST   /:id/generate                                        -- kick off Seedance + assembly
  *   POST   /:id/hooks                                           -- enqueue hook generator
  *   GET    /:id/status/stream                                   -- SSE progress
  */
 
+const path = require('path');
 const multer = require('multer');
 
 const projectRepo = require('../db/repositories/projectRepo');
@@ -35,15 +42,53 @@ const memoryUpload = multer({
   limits: { fileSize: 25 * 1024 * 1024 },
 });
 
+/** Subtitle font uploads: small TTF/OTF only for libass / FFmpeg. */
+const fontUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const n = (file.originalname || '').toLowerCase();
+    if (n.endsWith('.ttf') || n.endsWith('.otf')) cb(null, true);
+    else cb(new Error('Only .ttf and .otf font files are allowed'));
+  },
+});
+
 // ------- helpers -------------------------------------------------------------
+
+/**
+ * Use `R2_PUBLIC_BASE_URL/<object-key>` for browser fetches when the public
+ * dev URL (or custom domain) is set in .env — that is the usual Cloudflare
+ * setup: copy the “Public URL” from the bucket and set R2_PUBLIC_BASE_URL.
+ *
+ * Set `R2_USE_PUBLIC_CDN=0` to always mint presigned GET URLs instead (same
+ * bucket as the S3 API; use if the public URL 404s or points at another bucket).
+ */
+function preferPublicCdnUrls() {
+  const optOut = process.env.R2_USE_PUBLIC_CDN;
+  if (optOut === '0' || optOut === 'false' || optOut === 'no') {
+    return false;
+  }
+  const base = process.env.R2_PUBLIC_BASE_URL;
+  return !!(base && String(base).trim());
+}
+
+/**
+ * Resolve a renderable URL for an R2 object.
+ */
+async function urlFor(key) {
+  if (!key || !r2Service.isConfigured()) return null;
+  if (preferPublicCdnUrls()) {
+    const pub = r2Service.publicUrl(key);
+    if (pub) return pub;
+  }
+  return r2Service.getSignedDownloadUrl(key).catch(() => null);
+}
 
 async function hydrateImageVariants(images) {
   return Promise.all(
     images.map(async (img) => ({
       ...img,
-      signedUrl: r2Service.isConfigured()
-        ? await r2Service.getSignedDownloadUrl(img.r2Key).catch(() => null)
-        : null,
+      signedUrl: await urlFor(img.r2Key),
     }))
   );
 }
@@ -62,12 +107,8 @@ async function hydrateProjectDetailed(project) {
       return {
         ...scene,
         imageVariants: await hydrateImageVariants(images),
-        voiceSignedUrl: scene.voiceKey && r2Service.isConfigured()
-          ? await r2Service.getSignedDownloadUrl(scene.voiceKey).catch(() => null)
-          : null,
-        videoSignedUrl: scene.videoKey && r2Service.isConfigured()
-          ? await r2Service.getSignedDownloadUrl(scene.videoKey).catch(() => null)
-          : null,
+        voiceSignedUrl: await urlFor(scene.voiceKey),
+        videoSignedUrl: await urlFor(scene.videoKey),
       };
     })
   );
@@ -75,19 +116,15 @@ async function hydrateProjectDetailed(project) {
   const hydratedHooks = await Promise.all(
     hookVariants.map(async (h) => ({
       ...h,
-      outputSignedUrl: h.outputKey && r2Service.isConfigured()
-        ? await r2Service.getSignedDownloadUrl(h.outputKey).catch(() => null)
-        : null,
+      outputSignedUrl: await urlFor(h.outputKey),
     }))
   );
 
-  const outputSignedUrl = project.outputKey && r2Service.isConfigured()
-    ? await r2Service.getSignedDownloadUrl(project.outputKey).catch(() => null)
-    : null;
-
-  const subtitlesSignedUrl = project.subtitlesKey && r2Service.isConfigured()
-    ? await r2Service.getSignedDownloadUrl(project.subtitlesKey).catch(() => null)
-    : null;
+  const outputSignedUrl = await urlFor(project.outputKey);
+  const subtitlesSignedUrl = await urlFor(project.subtitlesKey);
+  const subtitleCustomFontSignedUrl = await urlFor(
+    project.subtitleSettings?.customFontKey
+  );
 
   return {
     ...project,
@@ -95,6 +132,7 @@ async function hydrateProjectDetailed(project) {
     hookVariants: hydratedHooks,
     outputSignedUrl,
     subtitlesSignedUrl,
+    subtitleCustomFontSignedUrl,
   };
 }
 
@@ -110,6 +148,8 @@ async function create(req, res, next) {
       voiceId,
       voiceSettings = {},
       subtitleSettings = {},
+      imageModelSettings = {},
+      videoModelSettings = {},
       musicTrackId,
       musicVolume = 0.15,
       totalDurationSeconds = null,
@@ -135,6 +175,7 @@ async function create(req, res, next) {
     const project = await projectRepo.create({
       topic, sourceScript, styleId, sceneCount,
       voiceId, voiceSettings, subtitleSettings,
+      imageModelSettings, videoModelSettings,
       musicTrackId, musicVolume,
     });
 
@@ -182,6 +223,7 @@ async function patch(req, res, next) {
     const allowed = [
       'topic', 'sourceScript', 'styleId',
       'voiceId', 'voiceSettings', 'subtitleSettings',
+      'imageModelSettings', 'videoModelSettings',
       'musicTrackId', 'musicVolume',
     ];
     const patchBody = {};
@@ -253,6 +295,38 @@ async function regenerateImage(req, res, next) {
     });
 
     res.json({ enqueued: true, jobId: job.id });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function uploadSubtitleFont(req, res, next) {
+  try {
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const project = await projectRepo.findById(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const ext = path.extname(file.originalname || '.ttf').toLowerCase();
+    if (!['.ttf', '.otf'].includes(ext)) {
+      return res.status(400).json({ error: 'Only .ttf and .otf fonts are supported for burned subtitles' });
+    }
+    if (!r2Service.isConfigured()) {
+      return res.status(503).json({ error: 'Object storage is not configured; cannot upload fonts' });
+    }
+
+    const key = `projects/${req.params.id}/subtitle-font${ext}`;
+    await r2Service.upload(
+      key,
+      file.buffer,
+      ext === '.otf' ? 'font/otf' : 'font/ttf'
+    );
+
+    const prev = project.subtitleSettings || {};
+    const merged = { ...prev, customFontKey: key };
+    const updated = await projectRepo.update(req.params.id, { subtitleSettings: merged });
+    res.json({ project: updated });
   } catch (err) {
     next(err);
   }
@@ -365,6 +439,243 @@ async function generate(req, res, next) {
   }
 }
 
+/**
+ * Replace the entire scene list for a project. Used by the script-review
+ * page when the user reorders, edits, adds, or deletes scenes before
+ * approving image generation.
+ *
+ * Only allowed in pre-image states (draft, scripted, script-review).
+ * Replacing scenes after image gen has started would orphan generated
+ * images and videos.
+ */
+async function replaceScenes(req, res, next) {
+  try {
+    const { id: projectId } = req.params;
+    const { scenes } = req.body || {};
+
+    if (!Array.isArray(scenes) || scenes.length === 0) {
+      return res.status(400).json({ error: 'scenes[] required' });
+    }
+
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const editableStates = new Set(['draft', 'scripted', 'script-review']);
+    if (!editableStates.has(project.status)) {
+      return res.status(409).json({
+        error: `Cannot edit scenes once project status is '${project.status}'`,
+      });
+    }
+
+    const normalised = scenes.map((s, i) => ({
+      sceneIndex: i,
+      imagePrompt: String(s.imagePrompt || '').trim(),
+      voiceoverText: String(s.voiceoverText || '').trim(),
+      durationSeconds: Number(s.durationSeconds) || 5,
+    }));
+
+    for (const s of normalised) {
+      if (!s.imagePrompt || !s.voiceoverText) {
+        return res.status(400).json({
+          error: `Scene ${s.sceneIndex + 1}: imagePrompt and voiceoverText are required`,
+        });
+      }
+    }
+
+    const inserted = await sceneRepo.bulkReplace(projectId, normalised);
+
+    // Keep scene_count in sync if the user added/deleted scenes.
+    if (inserted.length !== project.sceneCount) {
+      await projectRepo.update(projectId, { sceneCount: inserted.length });
+    }
+
+    res.json({ scenes: inserted });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Re-run Claude script generation for an existing project. Used when the
+ * user is unhappy with the AI's first draft on the script-review page.
+ * Wipes all existing scenes (and their images, by FK cascade) and goes
+ * back to 'draft' status until the new script lands.
+ */
+async function regenerateScript(req, res, next) {
+  try {
+    const { id: projectId } = req.params;
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const editableStates = new Set(['draft', 'scripted', 'script-review', 'failed']);
+    if (!editableStates.has(project.status)) {
+      return res.status(409).json({
+        error: `Cannot regenerate script once project status is '${project.status}'`,
+      });
+    }
+
+    const {
+      sceneCount = project.sceneCount,
+      totalDurationSeconds = null,
+      language = 'English',
+      tone = 'dramatic',
+    } = req.body || {};
+
+    await projectRepo.updateStatus(projectId, 'draft');
+
+    await queues.sceneScript.add('generate', {
+      projectId,
+      input: project.sourceScript || project.topic,
+      mode: project.sourceScript ? 'rewrite' : 'topic',
+      sceneCount,
+      styleId: project.styleId,
+      totalDurationSeconds,
+      language,
+      tone,
+    });
+
+    res.json({ enqueued: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Approve the AI-generated scenes and kick off per-scene image generation.
+ * Moves status from 'script-review' to 'images-pending' and enqueues one
+ * image job per scene. The user lands on the image-picker page next.
+ */
+async function approveScript(req, res, next) {
+  try {
+    const { id: projectId } = req.params;
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const validFromStates = new Set(['scripted', 'script-review']);
+    if (!validFromStates.has(project.status)) {
+      return res.status(409).json({
+        error: `Cannot approve script when project status is '${project.status}'`,
+      });
+    }
+
+    const scenes = await sceneRepo.findByProject(projectId);
+    if (scenes.length === 0) {
+      return res.status(400).json({ error: 'Project has no scenes to approve' });
+    }
+
+    const variantCount = Math.min(
+      Math.max(parseInt(req.body?.variantCount, 10) || 3, 1),
+      6
+    );
+
+    await projectRepo.updateStatus(projectId, 'images-pending');
+
+    for (const s of scenes) {
+      await queues.sceneImages.add('generate-variants', {
+        projectId,
+        sceneId: s.id,
+        prompt: s.imagePrompt,
+        variantCount,
+        clearExisting: false,
+      });
+    }
+
+    await pubsub.publish(projectId, {
+      phase: 'images',
+      status: 'started',
+      sceneCount: scenes.length,
+    });
+
+    res.json({ enqueued: true, sceneCount: scenes.length });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Regenerate the Seedance video for a single scene without disturbing
+ * its siblings. Used by the per-scene retry button on the status page.
+ */
+async function regenerateSceneVideo(req, res, next) {
+  try {
+    const { id: projectId, sceneId } = req.params;
+
+    const scene = await sceneRepo.findById(sceneId);
+    if (!scene || scene.projectId !== projectId) {
+      return res.status(404).json({ error: 'Scene not found' });
+    }
+    if (!scene.selectedImageId) {
+      return res.status(400).json({ error: 'Scene has no selected image' });
+    }
+
+    // Reset video state for this scene only.
+    await sceneRepo.updateStatus(sceneId, 'image-ready', null, null);
+
+    const job = await queues.seedanceVideo.add('submit', { projectId, sceneId });
+    await pubsub.publish(projectId, { sceneId, phase: 'video', status: 'requeued' });
+    res.json({ enqueued: true, jobId: job.id });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Approve all per-scene videos and kick off the final assembly pipeline
+ * (subtitles + ffmpeg concat + music mix + color grade + upload). Mirror
+ * of approveScript: gates the heavy assembly step behind an explicit user
+ * action so the user can preview/regenerate scene videos first.
+ */
+async function approveVideos(req, res, next) {
+  try {
+    const { id: projectId } = req.params;
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    // 'failed' is allowed so the user can retry assembly after a previous
+    // ffmpeg run died, without re-rendering all the Seedance clips.
+    // 'complete' is allowed so the user can re-assemble after revisiting
+    // the videos page from the step nav (e.g. to apply new music/voice
+    // settings). 'assembling' is a no-op safety net if a duplicate
+    // request arrives while assembly is still running.
+    const validFromStates = new Set([
+      'videos-review',
+      'generating',
+      'failed',
+      'assembling',
+      'complete',
+    ]);
+    if (!validFromStates.has(project.status)) {
+      return res.status(409).json({
+        error: `Cannot approve videos when project status is '${project.status}'`,
+      });
+    }
+
+    const scenes = await sceneRepo.findByProject(projectId);
+    if (scenes.length === 0) {
+      return res.status(400).json({ error: 'Project has no scenes' });
+    }
+    const missingVideo = scenes.filter((s) => !s.videoKey);
+    if (missingVideo.length > 0) {
+      return res.status(400).json({
+        error: 'All scenes must have a generated video before approving',
+        missingSceneIndices: missingVideo.map((s) => s.sceneIndex),
+      });
+    }
+
+    // Final assembly processor builds subtitles inline (if needed) and
+    // then runs ffmpeg, so we don't enqueue projectSubtitles separately
+    // here -- doing so used to race the assembly job and ship a final
+    // cut without burned-in captions.
+    await projectRepo.updateStatus(projectId, 'assembling');
+    await queues.finalAssembly.add('assemble', { projectId });
+    await pubsub.publish(projectId, { phase: 'assembly', status: 'started' });
+
+    res.json({ enqueued: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function generateHooks(req, res, next) {
   try {
     const { id: projectId } = req.params;
@@ -426,10 +737,14 @@ async function statusStream(req, res, next) {
 
 module.exports = {
   create, list, get, patch, remove,
-  selectImage, regenerateImage, uploadImage,
+  replaceScenes, regenerateScript, approveScript,
+  selectImage, regenerateImage, uploadImage, uploadSubtitleFont,
   generateSceneVoice,
+  regenerateSceneVideo,
   regenerateSubtitles,
+  approveVideos,
   generate, generateHooks,
   statusStream,
   upload: memoryUpload,
+  fontUpload,
 };

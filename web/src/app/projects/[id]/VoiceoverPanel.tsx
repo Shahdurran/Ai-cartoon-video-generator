@@ -81,7 +81,7 @@ export function VoiceoverPanel({
           No voices available. Check ELEVENLABS_API_KEY.
         </div>
       ) : (
-        <div className="grid gap-2 max-h-[420px] overflow-y-auto pr-1">
+        <div className="grid gap-2 max-h-[420px] overflow-y-auto overflow-x-hidden pr-2">
           {filtered.map((v, i) => (
             <div
               key={v.voiceId}

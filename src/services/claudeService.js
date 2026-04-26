@@ -381,6 +381,13 @@ Return ONLY the script text - no titles, no labels, no meta-commentary.`;
       throw new Error('sceneCount must be >= 1');
     }
 
+    if (!this.config.apiKey) {
+      throw new Error(
+        'Claude is not configured: set ANTHROPIC_API_KEY in your server .env ' +
+        '(get a key at https://console.anthropic.com/settings/keys), then restart the backend.'
+      );
+    }
+
     const perSceneSeconds = totalDurationSeconds
       ? Math.max(2, Math.round(totalDurationSeconds / sceneCount))
       : 5;

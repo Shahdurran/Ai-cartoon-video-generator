@@ -20,6 +20,7 @@
 
 const axios = require('axios');
 const apiConfig = require('../config/api.config');
+const { mergeImageModelSettings } = require('../config/mediaModelDefaults');
 const r2Service = require('./r2Service');
 
 // Flux Dev / schnell / Flux Pro all use this enum.
@@ -71,6 +72,63 @@ function extractAxiosError(err) {
   return err.message;
 }
 
+/**
+ * Map a raw provider error string to a stable code the UI can render
+ * explanatory copy for. Order of checks matters -- specific signals before
+ * generic ones. Returns one of:
+ *   content_policy | rate_limit | quota | auth | timeout | network |
+ *   bad_request   | unknown
+ */
+function classifyImageError(message) {
+  if (!message) return 'unknown';
+  const m = String(message).toLowerCase();
+
+  if (
+    m.includes('content_policy') ||
+    m.includes('safety') ||
+    m.includes('nsfw') ||
+    m.includes('content filter') ||
+    m.includes('moderation') ||
+    m.includes('blocked')
+  ) return 'content_policy';
+
+  if (m.includes('429') || m.includes('rate limit') || m.includes('too many requests')) {
+    return 'rate_limit';
+  }
+
+  if (
+    m.includes('quota') ||
+    m.includes('insufficient') ||
+    m.includes('payment required') ||
+    m.includes('402')
+  ) return 'quota';
+
+  if (
+    m.includes('401') ||
+    m.includes('403') ||
+    m.includes('unauthorized') ||
+    m.includes('forbidden') ||
+    m.includes('invalid api key') ||
+    m.includes('not configured')
+  ) return 'auth';
+
+  if (m.includes('timeout') || m.includes('etimedout')) return 'timeout';
+
+  if (
+    m.includes('econn') ||
+    m.includes('enotfound') ||
+    m.includes('network') ||
+    m.includes('socket hang up') ||
+    m.includes('fetch failed')
+  ) return 'network';
+
+  if (m.includes('400') || m.includes('bad request') || m.includes('validation')) {
+    return 'bad_request';
+  }
+
+  return 'unknown';
+}
+
 async function postToFal(endpoint, body, apiKey) {
   const res = await axios.post(endpoint, body, {
     headers: {
@@ -116,22 +174,32 @@ async function callFluxSchnell({ prompt, aspectRatio, seed, apiKey }) {
   return { url: image.url, width: image.width, height: image.height, seed: data?.seed, model: 'flux-schnell' };
 }
 
-async function callNanoBanana({ prompt, aspectRatio, seed, resolution, apiKey }) {
+async function callNanoBanana({ prompt, aspectRatio, seed, apiKey, nano = {} }) {
+  const outFmt = ['jpeg', 'png', 'webp'].includes(nano.output_format) ? nano.output_format : 'png';
+  const resStr = NANO_BANANA_RESOLUTIONS.has(nano.resolution) ? nano.resolution : '1K';
+  const tol = ['1', '2', '3', '4', '5', '6'].includes(String(nano.safety_tolerance))
+    ? String(nano.safety_tolerance)
+    : '4';
+  const ratio = NANO_BANANA_ASPECT_RATIOS.has(aspectRatio) ? aspectRatio : 'auto';
+
   const body = {
     prompt,
-    aspect_ratio: NANO_BANANA_ASPECT_RATIOS.has(aspectRatio) ? aspectRatio : 'auto',
+    aspect_ratio: ratio,
     num_images: 1,
-    output_format: 'png',
-    resolution: NANO_BANANA_RESOLUTIONS.has(resolution) ? resolution : '1K',
-    safety_tolerance: '4',
-    // Prevents the model from generating intermediate drafts or interpreting
-    // numeric phrases in the prompt as multi-image instructions -- we manage
-    // variant count ourselves via the outer loop.
-    limit_generations: true,
+    output_format: outFmt,
+    resolution: resStr,
+    safety_tolerance: tol,
+    limit_generations: nano.limit_generations !== false,
+    sync_mode: !!nano.sync_mode,
+    enable_web_search: !!nano.enable_web_search,
   };
   if (seed !== null && seed !== undefined) body.seed = seed;
+  if (nano.thinking_level === 'minimal' || nano.thinking_level === 'high') {
+    body.thinking_level = nano.thinking_level;
+  }
 
-  const data = await postToFal('https://fal.run/fal-ai/nano-banana-2', body, apiKey);
+  const endpointId = (nano.imageModelId || 'fal-ai/nano-banana-2').replace(/^\//, '');
+  const data = await postToFal(`https://fal.run/${endpointId}`, body, apiKey);
   const image = data?.images?.[0];
   if (!image?.url) throw new Error('Nano Banana 2 response had no image URL');
   return { url: image.url, width: image.width, height: image.height, seed: data?.seed, model: 'nano-banana-2' };
@@ -142,7 +210,7 @@ async function callNanoBanana({ prompt, aspectRatio, seed, resolution, apiKey })
  * details if every provider fails, so upstream logs show the real reason
  * rather than the generic "Flux variant N failed".
  */
-async function callImageCascade(prompt, { aspectRatio, seed, resolution, preferredModel }) {
+async function callImageCascade(prompt, { fluxAspectRatio, nanoAspectRatio, seed, preferredModel, nanoBanana2 }) {
   const apiKey = apiConfig.falAI.apiKey;
   if (!apiKey) throw new Error('FAL_AI_API_KEY not configured');
 
@@ -153,7 +221,16 @@ async function callImageCascade(prompt, { aspectRatio, seed, resolution, preferr
   const errors = [];
   for (const fn of cascade) {
     try {
-      return await fn({ prompt, aspectRatio, seed, resolution, apiKey });
+      if (fn === callNanoBanana) {
+        return await fn({
+          prompt,
+          aspectRatio: nanoAspectRatio,
+          seed,
+          apiKey,
+          nano: nanoBanana2 || {},
+        });
+      }
+      return await fn({ prompt, aspectRatio: fluxAspectRatio, seed, apiKey });
     } catch (err) {
       const msg = extractAxiosError(err);
       errors.push(`${fn.name}: ${msg}`);
@@ -178,8 +255,7 @@ async function downloadImageBuffer(url) {
  * @param {object} [input.style]        Style row (fluxPromptSuffix, negativePrompt).
  * @param {number} [input.variantCount=3]
  * @param {string} [input.aspectRatio='16:9']
- * @param {string} [input.model='nano-banana-2']  'nano-banana-2' | 'flux-dev'
- * @param {string} [input.resolution='1K']        Nano Banana only: '0.5K'|'1K'|'2K'|'4K'
+ * @param {object} [input.imageModelSettings]  merged in worker from `projects.image_model_settings`
  * @returns {Promise<Array<{variantIndex, r2Key, promptUsed, width, height, seed}>>}
  */
 async function generateSceneVariants(input) {
@@ -190,35 +266,58 @@ async function generateSceneVariants(input) {
     style = null,
     variantCount = 3,
     aspectRatio = '16:9',
-    model = 'nano-banana-2',
-    resolution = '1K',
+    imageModelSettings = {},
   } = input;
 
   if (!projectId || !sceneId) throw new Error('projectId and sceneId required');
   if (!prompt) throw new Error('prompt required');
 
+  // Fail fast if R2 isn't configured -- otherwise we'd happily generate
+  // images, write rows the UI can't render, and leave scenes stuck in
+  // "rendering…" forever. The classifier maps this to errorCode 'auth'.
+  if (!r2Service.isConfigured()) {
+    throw new Error(
+      'R2 storage is not configured. Set R2_ACCOUNT_ID (or R2_ENDPOINT), R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET in the server .env, then restart.'
+    );
+  }
+
+  const imgCfg = mergeImageModelSettings(imageModelSettings);
+  const preferredModel =
+    imgCfg.preferredCascade === 'flux-dev' || imgCfg.preferredCascade === 'dev'
+      ? 'flux-dev'
+      : 'nano-banana-2';
+
+  const rawAspect = imgCfg.nanoBanana2?.aspect_ratio || aspectRatio;
+  const nanoAspectRatio = NANO_BANANA_ASPECT_RATIOS.has(rawAspect) ? rawAspect : 'auto';
+  const fluxAspectRatio =
+    rawAspect === 'auto' || !FLUX_ASPECT_RATIO_MAP[rawAspect] ? '16:9' : rawAspect;
+
+  const nanoBanana2 = {
+    ...imgCfg.nanoBanana2,
+    imageModelId: imgCfg.imageModelId || 'fal-ai/nano-banana-2',
+  };
+
   const positivePrompt = buildPositivePrompt(prompt, style);
   const negativePrompt = buildNegativePrompt(style);
   const finalPrompt = composeFinalPrompt(positivePrompt, negativePrompt);
-  const preferredModel = model === 'flux-dev' || model === 'dev' ? 'flux-dev' : 'nano-banana-2';
 
   const variants = [];
   const errors = [];
   for (let i = 0; i < variantCount; i++) {
     try {
       const img = await callImageCascade(finalPrompt, {
-        aspectRatio,
+        fluxAspectRatio,
+        nanoAspectRatio,
         seed: Math.floor(Math.random() * 1_000_000_000),
-        resolution,
         preferredModel,
+        nanoBanana2,
       });
       const buf = await downloadImageBuffer(img.url);
-      const r2Key = r2Service.keys.sceneImage(projectId, sceneId, i, 'png');
-      if (r2Service.isConfigured()) {
-        await r2Service.upload(r2Key, buf, 'image/png');
-      } else {
-        console.warn('⚠️  R2 not configured; image generated but not uploaded');
-      }
+      const fmt = (nanoBanana2.output_format || 'png').toLowerCase();
+      const ext = fmt === 'jpeg' ? 'jpg' : fmt === 'webp' ? 'webp' : 'png';
+      const mime = ext === 'jpg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
+      const r2Key = r2Service.keys.sceneImage(projectId, sceneId, i, ext);
+      await r2Service.upload(r2Key, buf, mime);
       variants.push({
         variantIndex: i,
         r2Key,
@@ -251,4 +350,5 @@ module.exports = {
   buildPositivePrompt,
   buildNegativePrompt,
   composeFinalPrompt,
+  classifyImageError,
 };

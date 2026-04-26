@@ -44,6 +44,16 @@ export type SceneImage = {
   promptUsed: string | null;
 };
 
+export type SceneErrorCode =
+  | 'content_policy'
+  | 'rate_limit'
+  | 'quota'
+  | 'auth'
+  | 'timeout'
+  | 'network'
+  | 'bad_request'
+  | 'unknown';
+
 export type Scene = {
   id: string;
   projectId: string;
@@ -57,10 +67,34 @@ export type Scene = {
   falRequestId: string | null;
   status: string;
   errorMessage: string | null;
+  errorCode: SceneErrorCode | null;
   imageVariants: SceneImage[];
   voiceSignedUrl: string | null;
   videoSignedUrl: string | null;
 };
+
+/**
+ * Scene shape accepted by PUT /scenes (script-review bulk replace).
+ * sceneIndex is recomputed server-side from array order.
+ */
+export type SceneDraft = {
+  imagePrompt: string;
+  voiceoverText: string;
+  durationSeconds: number;
+};
+
+export type ProjectStatus =
+  | 'draft'
+  | 'scripted'        // legacy; new projects skip this state
+  | 'script-review'
+  | 'images-pending'
+  | 'images-review'
+  | 'images-ready'    // legacy; behaves like images-review
+  | 'generating'
+  | 'videos-review'   // per-scene videos rendered; user previews/approves before assembly
+  | 'assembling'
+  | 'complete'
+  | 'failed';
 
 export type HookVariant = {
   id: string;
@@ -81,12 +115,58 @@ export type VoiceSettings = {
   speed?: number;
 };
 
+export type ImageModelSettings = {
+  /** Which provider runs first in the cascade */
+  preferredCascade?: 'nano-banana-2' | 'flux-dev';
+  /** Fal text-to-image endpoint (Nano Banana 2) */
+  imageModelId?: string;
+  nanoBanana2?: {
+    aspect_ratio?: string;
+    resolution?: string;
+    output_format?: 'png' | 'jpeg' | 'webp';
+    safety_tolerance?: string;
+    sync_mode?: boolean;
+    limit_generations?: boolean;
+    enable_web_search?: boolean;
+    thinking_level?: string;
+  };
+};
+
+export type VideoModelSettings = {
+  videoModelId?: string;
+  seedance20?: {
+    resolution?: '480p' | '720p';
+    duration?: string;
+    aspect_ratio?: string;
+    generate_audio?: boolean;
+    seed?: string | number | null;
+    end_image_url?: string;
+    end_user_id?: string;
+  };
+};
+
+export type SubtitleAnimationPreset =
+  | 'none'
+  | 'fade'
+  | 'slide-up'
+  | 'slide-down'
+  | 'pop'
+  | 'soft-glow';
+
 export type SubtitleSettings = {
   fontName?: string;
   fontSize?: number;
   fontColor?: string;
   position?: 'top' | 'middle' | 'bottom';
   outline?: boolean;
+  /** Outline thickness for libass (0–4) when outline is true */
+  outlineWidth?: number;
+  shadow?: boolean;
+  bold?: boolean;
+  /** R2 key set by POST /projects/:id/subtitle-font — final render uses FFmpeg fontsdir */
+  customFontKey?: string | null;
+  /** Preview / UI: how the in-browser sample animates (FFmpeg SRT burn-in is static) */
+  animationPreset?: SubtitleAnimationPreset;
   maxCharsPerLine?: number;
   maxLines?: number;
 };
@@ -101,10 +181,14 @@ export type Project = {
   voiceId: string | null;
   voiceSettings: VoiceSettings;
   subtitleSettings: SubtitleSettings;
+  imageModelSettings?: ImageModelSettings;
+  videoModelSettings?: VideoModelSettings;
   musicTrackId: string | null;
   musicVolume: number;
   subtitlesKey: string | null;
   subtitlesSignedUrl: string | null;
+  /** Signed URL for user-uploaded subtitle font (.ttf/.otf), when present */
+  subtitleCustomFontSignedUrl?: string | null;
   outputKey: string | null;
   outputSignedUrl: string | null;
   errorMessage: string | null;
@@ -157,6 +241,8 @@ export const api = {
     voiceId?: string;
     voiceSettings?: VoiceSettings;
     subtitleSettings?: SubtitleSettings;
+    imageModelSettings?: ImageModelSettings;
+    videoModelSettings?: VideoModelSettings;
     musicTrackId?: string;
     musicVolume?: number;
     totalDurationSeconds?: number;
@@ -172,6 +258,27 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+
+  /** Upload a .ttf or .otf for subtitle burn-in (stored on R2; merges customFontKey into subtitleSettings). */
+  uploadSubtitleFont: async (projectId: string, file: File) => {
+    const fd = new FormData();
+    fd.append('font', file);
+    const res = await fetch(`${API_BASE}/api/projects/${projectId}/subtitle-font`, {
+      method: 'POST',
+      body: fd,
+    });
+    if (!res.ok) {
+      let message = `${res.status} ${res.statusText}`;
+      try {
+        const body = await res.json();
+        if (body?.error) message = body.error;
+      } catch (_) {
+        /* ignore */
+      }
+      throw new Error(message);
+    }
+    return res.json() as Promise<{ project: Project }>;
+  },
   deleteProject: (id: string) =>
     request<void>(`/api/projects/${id}`, { method: 'DELETE' }),
 
@@ -208,6 +315,37 @@ export const api = {
       { method: 'POST', body: JSON.stringify(body || {}) }
     ),
 
+  /** Re-run Seedance for a single scene. */
+  regenerateSceneVideo: (projectId: string, sceneId: string) =>
+    request<{ enqueued: true; jobId: string }>(
+      `/api/projects/${projectId}/scenes/${sceneId}/regenerate-video`,
+      { method: 'POST', body: JSON.stringify({}) }
+    ),
+
+  /** Bulk replace scenes during the script-review step. */
+  replaceScenes: (projectId: string, scenes: SceneDraft[]) =>
+    request<{ scenes: Scene[] }>(`/api/projects/${projectId}/scenes`, {
+      method: 'PUT',
+      body: JSON.stringify({ scenes }),
+    }),
+
+  /** Re-run Claude script generation. */
+  regenerateScript: (
+    projectId: string,
+    body: { sceneCount?: number; totalDurationSeconds?: number; tone?: string; language?: string } = {}
+  ) =>
+    request<{ enqueued: true }>(
+      `/api/projects/${projectId}/regenerate-script`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+
+  /** Approve script -> kick off per-scene image generation. */
+  approveScript: (projectId: string, body: { variantCount?: number } = {}) =>
+    request<{ enqueued: true; sceneCount: number }>(
+      `/api/projects/${projectId}/approve-script`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+
   regenerateSubtitles: (projectId: string, subtitleSettings?: SubtitleSettings) =>
     request<{ enqueued: true; jobId: string }>(
       `/api/projects/${projectId}/subtitles`,
@@ -217,6 +355,13 @@ export const api = {
   generate: (projectId: string) =>
     request<{ enqueued: true; sceneCount: number }>(
       `/api/projects/${projectId}/generate`,
+      { method: 'POST', body: JSON.stringify({}) }
+    ),
+
+  /** Approve all per-scene videos -> kick off subtitles + final assembly. */
+  approveVideos: (projectId: string) =>
+    request<{ enqueued: true }>(
+      `/api/projects/${projectId}/approve-videos`,
       { method: 'POST', body: JSON.stringify({}) }
     ),
 

@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, type Project, type Voice, type MusicTrack } from '@/lib/api';
 import { ScenePicker } from './ScenePicker';
 import { VoiceoverPanel } from './VoiceoverPanel';
 import { SubtitlePanel } from './SubtitlePanel';
+import { VideoModelPanel } from './ModelSettingsPanel';
 import { MusicLibraryModal } from './MusicLibraryModal';
 import { AudioPreviewButton } from '@/components/AudioPreviewButton';
 
@@ -22,29 +23,58 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
   const [musicModalOpen, setMusicModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const reloadDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Poll until scenes arrive (status: scripted) and then again while images render.
+  // Live updates via SSE -- no more 3s polling. Image / voice / video phase
+  // events from the queue trigger a debounced refetch so signed URLs stay
+  // valid and per-scene status pills update in real time.
   useEffect(() => {
-    const pollWhile = ['draft', 'scripted'];
-    if (!pollWhile.includes(project.status) && project.scenes.some((s) => !s.imageVariants.length)) {
-      // Scenes present but images still generating.
-    } else if (!pollWhile.includes(project.status)) {
+    const url = api.statusStreamUrl(project.id);
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(url);
+    } catch {
       return;
     }
-    const t = setInterval(async () => {
+
+    function scheduleReload() {
+      if (reloadDebounce.current) clearTimeout(reloadDebounce.current);
+      reloadDebounce.current = setTimeout(refresh, 400);
+    }
+
+    es.onmessage = (ev) => {
       try {
-        const { project: fresh } = await api.getProject(project.id);
-        setProject(fresh);
-        if (fresh.status === 'complete') clearInterval(t);
-      } catch (_) { /* ignore */ }
-    }, 3000);
-    return () => clearInterval(t);
+        const payload = JSON.parse(ev.data);
+        if (!payload?.phase) return;
+
+        if (payload.phase === 'images' || payload.phase === 'image') {
+          scheduleReload();
+        } else if (payload.phase === 'pipeline' && payload.status === 'started') {
+          router.push(`/projects/${project.id}/status`);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    es.onerror = () => {
+      // Browser auto-reconnects.
+    };
+
+    return () => {
+      es?.close();
+      if (reloadDebounce.current) clearTimeout(reloadDebounce.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id, project.status]);
+  }, [project.id]);
 
   async function refresh() {
-    const { project: fresh } = await api.getProject(project.id);
-    setProject(fresh);
+    try {
+      const { project: fresh } = await api.getProject(project.id);
+      setProject(fresh);
+    } catch {
+      /* ignore */
+    }
   }
 
   async function handleGenerate() {
@@ -62,9 +92,25 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
   const allSceneImagesPicked =
     project.scenes.length > 0 &&
     project.scenes.every((s) => s.selectedImageId);
-  const hasVoice = project.voiceId;
+  const hasVoice = !!project.voiceId;
   const ready = allSceneImagesPicked && hasVoice;
   const selectedTrack = tracks.find((t) => t.id === project.musicTrackId);
+
+  const stillRendering = project.scenes.some(
+    (s) => s.imageVariants.length === 0 && s.status !== 'failed'
+  );
+  const failedCount = project.scenes.filter((s) => s.status === 'failed').length;
+  const pickedCount = project.scenes.filter((s) => !!s.selectedImageId).length;
+  const totalCount = project.scenes.length;
+
+  const readyTooltip = useMemo(() => {
+    if (!hasVoice) return 'Pick a voice in the sidebar before generating';
+    if (!allSceneImagesPicked) {
+      const remaining = totalCount - pickedCount;
+      return `${remaining} scene${remaining === 1 ? '' : 's'} still need an image picked`;
+    }
+    return 'Start the video generation pipeline';
+  }, [hasVoice, allSceneImagesPicked, pickedCount, totalCount]);
 
   return (
     <div>
@@ -76,6 +122,14 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
           <div className="mt-2 text-sm text-ink-100/70">
             {project.sceneCount} scenes · status:{' '}
             <span className="font-medium text-white">{project.status}</span>
+            {totalCount > 0 && (
+              <span className="ml-2 text-ink-200/70">
+                · {pickedCount}/{totalCount} picked
+                {failedCount > 0 && (
+                  <span className="ml-2 text-rose-300">· {failedCount} failed</span>
+                )}
+              </span>
+            )}
           </div>
           {project.errorMessage && (
             <div className="mt-3 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
@@ -96,11 +150,22 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
             onClick={handleGenerate}
             disabled={!ready || submitting}
             className="btn-primary"
+            title={readyTooltip}
           >
             {submitting ? 'Starting…' : 'Generate video'}
           </button>
         </div>
       </div>
+
+      {/* Inline guidance banner so the user knows the sidebar is editable
+          while images are still rendering. */}
+      {stillRendering && (
+        <div className="mb-6 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-ink-100/85 animate-fade-in">
+          <span className="text-white font-medium">Images are still rendering.</span>
+          {' '}You can pick voice, subtitles, and music in the sidebar now —
+          they don&rsquo;t block image generation.
+        </div>
+      )}
 
       {error && (
         <div className="mb-6 rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200 animate-fade-in">
@@ -119,7 +184,7 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
                 }}
               />
               <div className="text-sm text-ink-100/80">
-                Claude is writing your scene breakdown…
+                Waiting for scene images…
               </div>
             </div>
           ) : (
@@ -140,6 +205,11 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
         </div>
 
         <aside className="col-span-1 space-y-6">
+          <VideoModelPanel
+            projectId={project.id}
+            videoModelSettings={project.videoModelSettings}
+            onSaved={refresh}
+          />
           <VoiceoverPanel
             projectId={project.id}
             voices={voices}
@@ -150,6 +220,7 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
           <SubtitlePanel
             projectId={project.id}
             currentSettings={project.subtitleSettings}
+            customFontSignedUrl={project.subtitleCustomFontSignedUrl}
             onSaved={refresh}
           />
           <div className="glass-panel animate-fade-up">

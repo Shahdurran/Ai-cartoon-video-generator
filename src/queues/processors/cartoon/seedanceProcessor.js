@@ -44,10 +44,14 @@ async function handleSubmit(job) {
 
   await pubsub.publish(projectId, { sceneId, phase: 'video', status: 'submitting' });
 
+  const project = await projectRepo.findById(projectId);
+  if (!project) throw new Error(`Project ${projectId} not found`);
+
   const { requestId, modelId } = await falVideo.submit({
     imageUrl,
     prompt: scene.imagePrompt,
-    duration: Math.min(10, Math.max(3, Math.round(Number(scene.durationSeconds) || 5))),
+    projectVideoSettings: project.videoModelSettings || {},
+    sceneDurationSeconds: scene.durationSeconds,
   });
 
   await sceneRepo.setFalRequestId(sceneId, requestId);
@@ -72,6 +76,7 @@ async function handlePoll(job) {
   if (pollCount > MAX_POLLS) {
     await sceneRepo.updateStatus(sceneId, 'failed', 'Seedance poll timed out');
     await pubsub.publish(projectId, { sceneId, phase: 'video', status: 'failed', error: 'timeout' });
+    await maybeMarkVideosReady(projectId);
     throw new Error('Seedance poll timeout');
   }
 
@@ -122,6 +127,7 @@ async function handlePoll(job) {
     } catch (err) {
       await sceneRepo.updateStatus(sceneId, 'failed', err.message);
       await pubsub.publish(projectId, { sceneId, phase: 'video', status: 'failed', error: err.message });
+      await maybeMarkVideosReady(projectId);
       throw err;
     }
   }
@@ -130,24 +136,41 @@ async function handlePoll(job) {
   const errorMsg = `Seedance returned terminal state: ${phase}`;
   await sceneRepo.updateStatus(sceneId, 'failed', errorMsg);
   await pubsub.publish(projectId, { sceneId, phase: 'video', status: 'failed', error: errorMsg });
+  await maybeMarkVideosReady(projectId);
   throw new Error(errorMsg);
 }
 
-async function maybeKickoffFinalAssembly(projectId) {
+/**
+ * Move the project into 'videos-review' once every scene either has a
+ * Seedance render or has terminally failed. The user explicitly approves
+ * the renders (POST /:id/approve-videos) before final assembly runs --
+ * mirrors the script-review and images-review gates.
+ */
+async function maybeMarkVideosReady(projectId) {
   const project = await projectRepo.findById(projectId);
   if (!project) return;
-  if (project.status === 'complete' || project.status === 'assembling') return;
-
-  const readyCount = await sceneRepo.countByStatus(projectId, 'video-ready');
-  if (readyCount < project.sceneCount) return;
-
-  // Kick off subtitles (if not already generated) and final assembly in sequence.
-  if (!project.subtitlesKey) {
-    await queues.projectSubtitles.add('generate', { projectId });
+  if (
+    project.status === 'complete' ||
+    project.status === 'assembling' ||
+    project.status === 'videos-review'
+  ) {
+    return;
   }
-  await projectRepo.updateStatus(projectId, 'assembling');
-  await queues.finalAssembly.add('assemble', { projectId });
+
+  const scenes = await sceneRepo.findByProject(projectId);
+  if (scenes.length === 0) return;
+
+  const allDone = scenes.every(
+    (s) => !!s.videoKey || s.status === 'failed'
+  );
+  if (!allDone) return;
+
+  await projectRepo.updateStatus(projectId, 'videos-review');
+  await pubsub.publish(projectId, { phase: 'videos', status: 'review' });
 }
+
+// Back-compat alias -- old name was misleading once we added the review gate.
+const maybeKickoffFinalAssembly = maybeMarkVideosReady;
 
 module.exports = async function seedanceProcessor(job) {
   if (job.name === 'submit') return handleSubmit(job);
@@ -156,3 +179,4 @@ module.exports = async function seedanceProcessor(job) {
 };
 
 module.exports.maybeKickoffFinalAssembly = maybeKickoffFinalAssembly;
+module.exports.maybeMarkVideosReady = maybeMarkVideosReady;

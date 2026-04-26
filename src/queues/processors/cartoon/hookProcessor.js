@@ -98,7 +98,8 @@ async function runVariant({ variantId, variantIndex, hookScript, projectId, scen
   const { requestId, modelId } = await falVideo.submit({
     imageUrl,
     prompt: `${scene0.imagePrompt} -- emphasize opening beat, dynamic camera motion`,
-    duration: Math.max(3, Math.min(10, hookDurationSeconds)),
+    projectVideoSettings: project.videoModelSettings || {},
+    hookDurationSeconds,
   });
   const { videoUrl } = await waitForSeedance({ requestId, modelId });
 
@@ -107,9 +108,17 @@ async function runVariant({ variantId, variantIndex, hookScript, projectId, scen
 
   // 4. Burn subtitle onto hook clip
   const hookWithSubsPath = path.join(tmpDir, `hook-${variantIndex}-subs.mp4`);
+  const subtitleFontsDir = await assembler.prepareSubtitleFontDir(
+    project.subtitleSettings || {},
+    tmpDir
+  );
   await new Promise((resolve, reject) => {
     const ffmpeg = require('fluent-ffmpeg');
-    const subFilter = assembler.buildSubtitleFilter(hookSrtPath, project.subtitleSettings || {});
+    const subFilter = assembler.buildSubtitleFilter(
+      hookSrtPath,
+      project.subtitleSettings || {},
+      { fontsDir: subtitleFontsDir }
+    );
     const colorGrade = style?.ffmpegColorGrade;
     const videoFilter = colorGrade ? `${colorGrade},${subFilter}` : subFilter;
 

@@ -5,10 +5,18 @@ require('dotenv').config();
  * Centralized configuration for all external API integrations
  */
 
+// Anthropic accepts the official name only in docs, but people sometimes
+// use shorter aliases in .env — resolve them here so the SDK always gets
+// a concrete apiKey or fails loudly with setup instructions.
+const anthropicApiKey =
+  process.env.ANTHROPIC_API_KEY ||
+  process.env.ANTHROPIC_KEY ||
+  process.env.CLAUDE_API_KEY;
+
 const apiConfig = {
   // Claude API Configuration (Anthropic)
   claude: {
-    apiKey: process.env.ANTHROPIC_API_KEY,
+    apiKey: anthropicApiKey,
     model: 'claude-sonnet-4-5-20250929', // Claude Sonnet 4.5 (latest)
     maxTokens: 4096,
     temperature: 0.7,
@@ -80,8 +88,13 @@ const apiConfig = {
 };
 
 // Validation: Warn if required API keys are missing
+if (!anthropicApiKey) {
+  console.warn(
+    '⚠️  Warning: ANTHROPIC_API_KEY (or ANTHROPIC_KEY / CLAUDE_API_KEY) not set. Claude / scene script features will not work.'
+  );
+}
+
 const requiredKeys = {
-  ANTHROPIC_API_KEY: 'Claude API',
   FAL_AI_API_KEY: 'Fal.AI',
   GENAIPRO_API_KEY: 'Genaipro.vn',
   ASSEMBLYAI_API_KEY: 'AssemblyAI',

@@ -56,8 +56,25 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
     );
   }
 
+  // If the project has voiceovers but no subtitles, the most likely
+  // cause is a missing/invalid ASSEMBLYAI_API_KEY -- surface that
+  // visibly so the user doesn't think captions are silently broken.
+  const sceneHasVoice = project.scenes.some((s) => !!s.voiceKey);
+  const subtitlesMissing = sceneHasVoice && !project.subtitlesKey;
+
   return (
     <div className="space-y-10">
+      {subtitlesMissing && (
+        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 animate-fade-in">
+          <div className="font-medium mb-0.5">No subtitles were burned in</div>
+          <div className="text-xs text-amber-200/80">
+            Subtitle generation needs a valid <code className="text-amber-100">ASSEMBLYAI_API_KEY</code>.
+            Get one from <a href="https://www.assemblyai.com/app" target="_blank" rel="noreferrer" className="underline">assemblyai.com</a>,
+            add it to your <code className="text-amber-100">.env</code>, restart the backend,
+            then go back to <span className="text-white">Scene videos</span> and re-assemble.
+          </div>
+        </div>
+      )}
       <section className="animate-fade-up">
         <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-black shadow-glass-strong">
           <video

@@ -3,17 +3,23 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type Style, type Voice, type MusicTrack } from '@/lib/api';
-import { VoicePreviewCard } from '@/components/VoicePreviewCard';
-import { AudioPreviewButton } from '@/components/AudioPreviewButton';
 
 type Props = {
   styles: Style[];
-  tracks: MusicTrack[];
-  voices: Voice[];
-  voicesError: string | null;
+  /** Kept for API compatibility but no longer rendered on this page; voice
+   *  is picked on the project detail page once the script is approved. */
+  tracks?: MusicTrack[];
+  voices?: Voice[];
+  voicesError?: string | null;
 };
 
-export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
+/** Seedance produces ~5s clips; pad/trim happens during final assembly.
+ *  Anything outside this band warrants a soft warning so users don't
+ *  accidentally request impossible per-scene durations. */
+const PER_SCENE_MIN = 4;
+const PER_SCENE_MAX = 8;
+
+export function NewProjectForm({ styles }: Props) {
   const router = useRouter();
   const [mode, setMode] = useState<'topic' | 'rewrite'>('topic');
   const [topic, setTopic] = useState('');
@@ -21,24 +27,25 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
   const [styleId, setStyleId] = useState(styles[0]?.id || '');
   const [sceneCount, setSceneCount] = useState(5);
   const [totalDurationSeconds, setTotalDurationSeconds] = useState<number | ''>(30);
-  const [voiceId, setVoiceId] = useState(voices[0]?.voiceId || '');
-  const [voiceQuery, setVoiceQuery] = useState('');
-  const [musicTrackId, setMusicTrackId] = useState<string | ''>('');
-  const [musicVolume, setMusicVolume] = useState(0.15);
   const [tone, setTone] = useState('dramatic');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const filteredVoices = useMemo(() => {
-    if (!voiceQuery.trim()) return voices;
-    const q = voiceQuery.toLowerCase();
-    return voices.filter(
-      (v) =>
-        v.name.toLowerCase().includes(q) ||
-        v.category?.toLowerCase().includes(q) ||
-        Object.values(v.labels || {}).some((l) => l?.toLowerCase().includes(q))
-    );
-  }, [voices, voiceQuery]);
+  const perSceneSeconds = useMemo(() => {
+    if (typeof totalDurationSeconds !== 'number' || sceneCount <= 0) return null;
+    return totalDurationSeconds / sceneCount;
+  }, [totalDurationSeconds, sceneCount]);
+
+  const durationWarning = useMemo(() => {
+    if (perSceneSeconds == null) return null;
+    if (perSceneSeconds < PER_SCENE_MIN) {
+      return `That's only ${perSceneSeconds.toFixed(1)}s per scene. Seedance generates ~5s clips, so very short scenes will be padded or feel choppy.`;
+    }
+    if (perSceneSeconds > PER_SCENE_MAX) {
+      return `That's ${perSceneSeconds.toFixed(1)}s per scene. Anything over ${PER_SCENE_MAX}s typically requires multi-clip stitching that this pipeline doesn't do yet.`;
+    }
+    return null;
+  }, [perSceneSeconds]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -57,12 +64,11 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
         sceneCount,
         totalDurationSeconds:
           typeof totalDurationSeconds === 'number' ? totalDurationSeconds : undefined,
-        voiceId: voiceId || undefined,
-        musicTrackId: musicTrackId || undefined,
-        musicVolume,
         tone,
       });
-      router.push(`/projects/${project.id}`);
+      // Land on the script-review page; project detail page also handles
+      // routing, but this saves the user a redirect hop.
+      router.push(`/projects/${project.id}/script`);
     } catch (err: any) {
       setError(err.message || 'Failed to create project');
       setSubmitting(false);
@@ -71,7 +77,6 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-10">
-      {/* Input mode */}
       <section className="animate-fade-up">
         <SectionHeader step="1" title="What's the video about?" />
         <div className="flex gap-2 mb-3">
@@ -109,7 +114,6 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
         )}
       </section>
 
-      {/* Style picker */}
       <section className="animate-fade-up stagger-1">
         <SectionHeader step="2" title="Pick a style" />
         {styles.length === 0 ? (
@@ -152,75 +156,48 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
         )}
       </section>
 
-      {/* Scene + duration */}
-      <section className="grid grid-cols-2 gap-6 animate-fade-up stagger-2">
-        <label className="block">
-          <span className="label mb-1.5 block">Scenes</span>
-          <input
-            type="number"
-            min={1}
-            max={20}
-            value={sceneCount}
-            onChange={(e) => setSceneCount(parseInt(e.target.value || '0', 10))}
-            className="field"
-          />
-        </label>
-        <label className="block">
-          <span className="label mb-1.5 block">Target duration (seconds)</span>
-          <input
-            type="number"
-            min={6}
-            max={600}
-            value={totalDurationSeconds}
-            onChange={(e) =>
-              setTotalDurationSeconds(e.target.value ? parseInt(e.target.value, 10) : '')
-            }
-            className="field"
-          />
-        </label>
-      </section>
-
-      {/* Voice picker with previews */}
-      <section className="animate-fade-up stagger-3">
-        <SectionHeader step="3" title="Choose a voice" />
-        {voicesError ? (
-          <div className="text-xs text-rose-300">{voicesError}</div>
-        ) : voices.length === 0 ? (
-          <div className="text-xs text-ink-200/70">No voices available.</div>
-        ) : (
-          <>
+      <section className="animate-fade-up stagger-2">
+        <SectionHeader step="3" title="Scenes & duration" />
+        <div className="grid grid-cols-2 gap-6">
+          <label className="block">
+            <span className="label mb-1.5 block">Scenes</span>
             <input
-              placeholder="Search voices…"
-              value={voiceQuery}
-              onChange={(e) => setVoiceQuery(e.target.value)}
-              className="field mb-3"
+              type="number"
+              min={1}
+              max={20}
+              value={sceneCount}
+              onChange={(e) => setSceneCount(parseInt(e.target.value || '0', 10))}
+              className="field"
             />
-            <div className="grid sm:grid-cols-2 gap-2 max-h-[360px] overflow-y-auto pr-1">
-              {filteredVoices.map((v, i) => (
-                <div
-                  key={v.voiceId}
-                  className="animate-fade-up"
-                  style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}
-                >
-                  <VoicePreviewCard
-                    voice={v}
-                    selected={voiceId === v.voiceId}
-                    onSelect={() => setVoiceId(v.voiceId)}
-                  />
-                </div>
-              ))}
-              {filteredVoices.length === 0 && (
-                <div className="col-span-full text-xs text-ink-200/70 text-center py-6">
-                  No voices match &ldquo;{voiceQuery}&rdquo;.
-                </div>
-              )}
-            </div>
-          </>
+          </label>
+          <label className="block">
+            <span className="label mb-1.5 block">Target duration (seconds)</span>
+            <input
+              type="number"
+              min={6}
+              max={600}
+              value={totalDurationSeconds}
+              onChange={(e) =>
+                setTotalDurationSeconds(e.target.value ? parseInt(e.target.value, 10) : '')
+              }
+              className="field"
+            />
+          </label>
+        </div>
+        {perSceneSeconds != null && (
+          <div className="mt-2.5 text-[11px] text-ink-200/80">
+            ≈ <span className="text-white">{perSceneSeconds.toFixed(1)}s per scene</span>
+            {' '}— Seedance generates ~5s clips, so we&rsquo;ll trim or pad slightly.
+          </div>
+        )}
+        {durationWarning && (
+          <div className="mt-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100">
+            {durationWarning}
+          </div>
         )}
       </section>
 
-      {/* Tone */}
-      <section className="animate-fade-up stagger-4">
+      <section className="animate-fade-up stagger-3">
         <label className="block max-w-xs">
           <span className="label mb-1.5 block">Tone</span>
           <select
@@ -235,64 +212,11 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
             <option value="inspirational">Inspirational</option>
           </select>
         </label>
-      </section>
-
-      {/* Music */}
-      <section className="animate-fade-up stagger-5">
-        <SectionHeader step="4" title="Background music" />
-        <div className="grid sm:grid-cols-2 gap-3">
-          <button
-            type="button"
-            onClick={() => setMusicTrackId('')}
-            className={`text-left rounded-2xl border p-4 transition ${
-              !musicTrackId
-                ? 'border-brand-400/60 bg-white/[0.08]'
-                : 'border-white/10 bg-white/[0.03] hover:border-white/25 hover:bg-white/[0.06]'
-            }`}
-          >
-            <div className="text-sm font-medium text-white">None</div>
-            <div className="text-[11px] text-ink-200/70 mt-0.5">
-              No background music
-            </div>
-          </button>
-          {tracks.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setMusicTrackId(t.id)}
-              className={`text-left rounded-2xl border p-4 transition flex items-center gap-3 ${
-                musicTrackId === t.id
-                  ? 'border-brand-400/60 bg-white/[0.08]'
-                  : 'border-white/10 bg-white/[0.03] hover:border-white/25 hover:bg-white/[0.06]'
-              }`}
-            >
-              <AudioPreviewButton src={t.previewUrl} size="sm" />
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-white truncate">
-                  {t.name}
-                </div>
-                <div className="text-[11px] text-ink-200/70 truncate">
-                  {t.durationSeconds ? `${Math.round(t.durationSeconds)}s` : ''}
-                  {t.tags.length > 0 ? ` · ${t.tags.join(', ')}` : ''}
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-        <label className="block mt-4 max-w-md">
-          <span className="label mb-1.5 block">
-            Volume: {Math.round(musicVolume * 100)}%
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={musicVolume}
-            onChange={(e) => setMusicVolume(parseFloat(e.target.value))}
-            className="w-full"
-          />
-        </label>
+        <p className="mt-3 text-[11px] text-ink-200/60 max-w-md">
+          Voice, background music, and subtitle styling are picked after you
+          review the AI&rsquo;s scene breakdown — they don&rsquo;t affect
+          script generation.
+        </p>
       </section>
 
       {error && (
@@ -307,7 +231,7 @@ export function NewProjectForm({ styles, tracks, voices, voicesError }: Props) {
           disabled={submitting}
           className="btn-primary !px-6 !py-3"
         >
-          {submitting ? 'Creating…' : 'Create project'}
+          {submitting ? 'Writing your script…' : 'Generate script'}
         </button>
       </div>
     </form>

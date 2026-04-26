@@ -12,6 +12,8 @@ const SELECT_COLUMNS = `
   style_id AS "styleId", scene_count AS "sceneCount", status,
   voice_id AS "voiceId", voice_settings AS "voiceSettings",
   subtitle_settings AS "subtitleSettings",
+  image_model_settings AS "imageModelSettings",
+  video_model_settings AS "videoModelSettings",
   music_track_id AS "musicTrackId", music_volume AS "musicVolume",
   subtitles_key AS "subtitlesKey", output_key AS "outputKey",
   error_message AS "errorMessage",
@@ -27,6 +29,8 @@ async function create(project) {
     voiceId = null,
     voiceSettings = {},
     subtitleSettings = {},
+    imageModelSettings = {},
+    videoModelSettings = {},
     musicTrackId = null,
     musicVolume = 0.15,
   } = project;
@@ -34,12 +38,14 @@ async function create(project) {
   const { rows } = await query(
     `INSERT INTO projects
       (topic, source_script, style_id, scene_count, voice_id,
-       voice_settings, subtitle_settings, music_track_id, music_volume)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9)
+       voice_settings, subtitle_settings, image_model_settings, video_model_settings,
+       music_track_id, music_volume)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11)
      RETURNING ${SELECT_COLUMNS}`,
     [
       topic, sourceScript, styleId, sceneCount, voiceId,
       JSON.stringify(voiceSettings), JSON.stringify(subtitleSettings),
+      JSON.stringify(imageModelSettings), JSON.stringify(videoModelSettings),
       musicTrackId, musicVolume,
     ]
   );
@@ -78,6 +84,8 @@ async function update(id, patch) {
     voiceId: 'voice_id',
     voiceSettings: 'voice_settings',
     subtitleSettings: 'subtitle_settings',
+    imageModelSettings: 'image_model_settings',
+    videoModelSettings: 'video_model_settings',
     musicTrackId: 'music_track_id',
     musicVolume: 'music_volume',
     subtitlesKey: 'subtitles_key',
@@ -91,7 +99,11 @@ async function update(id, patch) {
 
   for (const [key, column] of Object.entries(fieldMap)) {
     if (patch[key] === undefined) continue;
-    const isJson = key === 'voiceSettings' || key === 'subtitleSettings';
+    const isJson =
+      key === 'voiceSettings' ||
+      key === 'subtitleSettings' ||
+      key === 'imageModelSettings' ||
+      key === 'videoModelSettings';
     sets.push(`${column} = $${i}${isJson ? '::jsonb' : ''}`);
     values.push(isJson ? JSON.stringify(patch[key]) : patch[key]);
     i++;

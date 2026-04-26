@@ -4,23 +4,13 @@ import { NewProjectForm } from './NewProjectForm';
 
 export const dynamic = 'force-dynamic';
 
-async function loadBootstrap() {
-  const [stylesRes, musicRes, voicesRes] = await Promise.allSettled([
-    api.listStyles(),
-    api.listMusic(),
-    api.listVoices(),
-  ]);
-  return {
-    styles: stylesRes.status === 'fulfilled' ? stylesRes.value.styles : [],
-    tracks: musicRes.status === 'fulfilled' ? musicRes.value.tracks : [],
-    voices: voicesRes.status === 'fulfilled' ? voicesRes.value.voices : [],
-    voicesError:
-      voicesRes.status === 'rejected' ? voicesRes.reason.message : null,
-  };
+async function loadStyles() {
+  const res = await api.listStyles().catch(() => ({ styles: [] }));
+  return res.styles;
 }
 
 export default async function NewProjectPage() {
-  const bootstrap = await loadBootstrap();
+  const styles = await loadStyles();
   return (
     <div className="max-w-4xl mx-auto px-6 py-10">
       <Link
@@ -29,10 +19,14 @@ export default async function NewProjectPage() {
       >
         ← All projects
       </Link>
-      <h1 className="text-4xl font-semibold tracking-tight mt-3 mb-8 text-white animate-fade-up">
+      <h1 className="text-4xl font-semibold tracking-tight mt-3 mb-2 text-white animate-fade-up">
         New <span className="text-gradient">project</span>
       </h1>
-      <NewProjectForm {...bootstrap} />
+      <p className="text-sm text-ink-100/70 mb-8 animate-fade-up stagger-1">
+        Pick a topic and a style. We&rsquo;ll draft the script first — you
+        can edit every scene before any images or video are generated.
+      </p>
+      <NewProjectForm styles={styles} />
     </div>
   );
 }

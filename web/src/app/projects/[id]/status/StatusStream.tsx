@@ -2,9 +2,17 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, type Project } from '@/lib/api';
+import { api, type Project, type Scene } from '@/lib/api';
 
-type PhaseState = 'idle' | 'running' | 'complete' | 'failed' | 'queued' | 'polling';
+type PhaseState =
+  | 'idle'
+  | 'running'
+  | 'complete'
+  | 'failed'
+  | 'queued'
+  | 'polling'
+  | 'submitting'
+  | 'requeued';
 type SceneState = {
   image: PhaseState;
   voice: PhaseState;
@@ -35,11 +43,20 @@ export function StatusStream({ project }: { project: Project }) {
   const [sceneMap, setSceneMap] = useState<Record<string, SceneState>>(() =>
     initialState(project)
   );
-  const [assembly, setAssembly] = useState<PhaseState>(
-    project.outputKey ? 'complete' : 'idle'
-  );
+  // If the project is mid-assembly we ignore any stale outputKey from a
+  // previous successful render -- otherwise re-assembly from a 'complete'
+  // project would render the page as "complete" the moment we land here.
+  const [assembly, setAssembly] = useState<PhaseState>(() => {
+    if (project.status === 'assembling') return 'running';
+    if (project.status === 'failed') return 'failed';
+    return project.outputKey ? 'complete' : 'idle';
+  });
   const [status, setStatus] = useState<string>(project.status);
   const [error, setError] = useState<string | null>(project.errorMessage);
+  // Tracks whether we've actually observed assembly transition to
+  // 'complete' during this page session (vs. landing on an already-
+  // complete project). Only the former should auto-bounce to /final.
+  const [justCompleted, setJustCompleted] = useState(false);
 
   useEffect(() => {
     const url = api.statusStreamUrl(project.id);
@@ -52,11 +69,17 @@ export function StatusStream({ project }: { project: Project }) {
 
         if (payload.phase === 'assembly') {
           setAssembly(payload.status);
-          if (payload.status === 'complete') setStatus('complete');
+          if (payload.status === 'complete') {
+            setStatus('complete');
+            setJustCompleted(true);
+          }
           if (payload.status === 'failed') {
             setStatus('failed');
             setError(payload.error);
           }
+        } else if (payload.phase === 'videos' && payload.status === 'review') {
+          // Per-scene Seedance step finished; jump to the videos-review page.
+          setStatus('videos-review');
         } else if (payload.phase === 'pipeline') {
           setStatus(payload.status === 'started' ? 'generating' : status);
         } else if (payload.sceneId) {
@@ -84,11 +107,22 @@ export function StatusStream({ project }: { project: Project }) {
   }, [project.id]);
 
   useEffect(() => {
-    if (status === 'complete') {
-      const t = setTimeout(() => router.push(`/projects/${project.id}/final`), 1500);
+    // Only auto-jump to /final when we observed the assembly finish in
+    // this session. Landing on an already-complete project should not
+    // bounce -- the user may have come here via the step nav to monitor
+    // a re-assembly that hasn't been published yet.
+    if (status === 'complete' && justCompleted) {
+      const t = setTimeout(() => {
+        router.refresh();
+        router.push(`/projects/${project.id}/final`);
+      }, 1500);
       return () => clearTimeout(t);
     }
-  }, [status, project.id, router]);
+    if (status === 'videos-review') {
+      const t = setTimeout(() => router.push(`/projects/${project.id}/videos`), 800);
+      return () => clearTimeout(t);
+    }
+  }, [status, justCompleted, project.id, router]);
 
   const orderedScenes = useMemo(
     () => [...project.scenes].sort((a, b) => a.sceneIndex - b.sceneIndex),
@@ -113,6 +147,7 @@ export function StatusStream({ project }: { project: Project }) {
                   {p.label}
                 </th>
               ))}
+              <th className="px-4 py-3 text-left font-medium" />
             </tr>
           </thead>
           <tbody>
@@ -137,6 +172,22 @@ export function StatusStream({ project }: { project: Project }) {
                       <PhasePill value={(st as any)[p.key] as PhaseState} />
                     </td>
                   ))}
+                  <td className="px-4 py-3 align-top">
+                    <SceneRetryButton
+                      scene={scene}
+                      videoState={st.video}
+                      onRetried={(vState) =>
+                        setSceneMap((prev) => ({
+                          ...prev,
+                          [scene.id]: {
+                            ...(prev[scene.id] || { image: 'idle', voice: 'idle', video: 'idle' }),
+                            video: vState,
+                            error: undefined,
+                          },
+                        }))
+                      }
+                    />
+                  </td>
                 </tr>
               );
             })}
@@ -162,6 +213,8 @@ function PhasePill({ value }: { value: PhaseState }) {
     idle: 'bg-white/10 text-ink-100 border border-white/10',
     queued: 'bg-indigo-400/15 text-indigo-200 border border-indigo-400/30',
     polling: 'bg-indigo-400/15 text-indigo-200 border border-indigo-400/30',
+    submitting: 'bg-indigo-400/15 text-indigo-200 border border-indigo-400/30',
+    requeued: 'bg-indigo-400/15 text-indigo-200 border border-indigo-400/30',
     running:
       'bg-brand-400/15 text-brand-100 border border-brand-400/30 animate-glow',
     complete:
@@ -173,5 +226,43 @@ function PhasePill({ value }: { value: PhaseState }) {
       <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
       {value}
     </span>
+  );
+}
+
+/** Per-scene retry control. Only renders when the video phase has failed,
+ *  so successful or in-flight scenes don't get a noisy button. */
+function SceneRetryButton({
+  scene,
+  videoState,
+  onRetried,
+}: {
+  scene: Scene;
+  videoState: PhaseState;
+  onRetried: (state: PhaseState) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  if (videoState !== 'failed') return null;
+
+  async function handleClick() {
+    setBusy(true);
+    try {
+      await api.regenerateSceneVideo(scene.projectId, scene.id);
+      onRetried('requeued');
+    } catch (_err) {
+      onRetried('failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={busy}
+      className="btn-ghost !px-2.5 !py-1 !text-[11px]"
+    >
+      {busy ? 'Retrying…' : 'Retry'}
+    </button>
   );
 }
