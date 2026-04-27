@@ -19,7 +19,6 @@
  */
 
 const path = require('path');
-const os = require('os');
 const fs = require('fs-extra');
 
 const ClaudeService = require('../../../services/claudeService');
@@ -196,7 +195,15 @@ module.exports = async function hookProcessor(job) {
   }
 
   // 3. Download original final video once; all variants reuse it.
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), `hook-${projectId}-`));
+  // Use a repo-local temp dir (NOT os.tmpdir()) -- on Windows that
+  // resolves to a path with a "~" 8.3 short-name (e.g.
+  // C:\Users\SHAHDU~1\AppData\Local\Temp), which the libass `subtitles=`
+  // filter mis-parses as a special character and ffmpeg fails with
+  // "Error opening output file: Invalid argument". Same workaround as
+  // cartoonAssemblerService.assembleFinalVideo.
+  const baseTmp = path.join(process.cwd(), 'temp', 'hook-assembly');
+  await fs.ensureDir(baseTmp);
+  const tmpDir = await fs.mkdtemp(path.join(baseTmp, `${projectId}-`));
   const originalVideoPath = path.join(tmpDir, 'original.mp4');
   if (r2Service.isConfigured()) {
     await r2Service.downloadToFile(project.outputKey, originalVideoPath);

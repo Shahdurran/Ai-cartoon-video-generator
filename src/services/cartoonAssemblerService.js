@@ -8,6 +8,7 @@
 
 const fs = require('fs-extra');
 const path = require('path');
+const https = require('https');
 const ffmpeg = require('fluent-ffmpeg');
 
 const r2Service = require('./r2Service');
@@ -23,28 +24,120 @@ function escapeFontToken(name) {
   return String(name || 'Arial').replace(/'/g, "\\'");
 }
 
+function httpGet(url, { redirects = 5, headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers }, (res) => {
+      // Follow redirects
+      if (
+        [301, 302, 303, 307, 308].includes(res.statusCode) &&
+        res.headers.location &&
+        redirects > 0
+      ) {
+        res.resume();
+        return resolve(httpGet(res.headers.location, { redirects: redirects - 1, headers }));
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`GET ${url} -> HTTP ${res.statusCode}`));
+      }
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ body: Buffer.concat(chunks), headers: res.headers }));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(15000, () => {
+      req.destroy(new Error(`GET ${url} timed out`));
+    });
+  });
+}
+
 /**
- * Download a user-uploaded subtitle font from R2 into a temp directory so
- * libass can resolve it via the `fontsdir` option on the subtitles filter.
+ * Fetch a Google Font family's regular weight TTF/OTF and write it into
+ * `fontDir`. We hit the public CSS2 endpoint with a Windows User-Agent so
+ * Google serves us TTFs (rather than woff2 which libass can't read), parse
+ * the first `src: url(…)` from the @font-face block, and download that.
  *
- * @param {object} settings  subtitleSettings from the project row
- * @param {string} tmpDir    Assembly temp directory
- * @returns {Promise<string|null>}  Absolute path to fonts directory, or null
+ * Returns the local path of the downloaded font, or null on any failure.
  */
-async function prepareSubtitleFontDir(settings, tmpDir) {
-  const key = settings?.customFontKey;
-  if (!key || !r2Service.isConfigured()) return null;
+async function downloadGoogleFont(family, fontDir) {
+  if (!family) return null;
+  // Skip families that ship with libass / OS-default mapping (don't bother
+  // hitting Google for plain Arial/Times/Courier).
+  const builtIn = new Set(['arial', 'times new roman', 'courier new', 'verdana', 'tahoma']);
+  if (builtIn.has(family.toLowerCase())) return null;
+
   try {
-    const fontDir = path.join(tmpDir, 'subtitle-fonts');
-    await fs.ensureDir(fontDir);
-    const ext = path.extname(key) || '.ttf';
-    const localPath = path.join(fontDir, `userfont${ext}`);
-    await r2Service.downloadToFile(key, localPath);
-    return fontDir;
+    const cssUrl = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(
+      family
+    )}:wght@400;700&display=swap`;
+    const cssRes = await httpGet(cssUrl, {
+      headers: {
+        // Force ttf payloads (woff2 default would be unusable by libass).
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.36',
+      },
+    });
+    const css = cssRes.body.toString('utf8');
+    const m = css.match(/src:\s*url\(([^)]+)\)\s*format\(['"]?truetype['"]?\)/i)
+      || css.match(/src:\s*url\(([^)]+)\)/i);
+    if (!m) {
+      console.warn(`⚠️  [fonts] could not parse font URL from Google CSS for "${family}"`);
+      return null;
+    }
+    const fontUrl = m[1].trim().replace(/^['"]|['"]$/g, '');
+    const fontRes = await httpGet(fontUrl);
+    const ext = path.extname(new URL(fontUrl).pathname) || '.ttf';
+    const safe = family.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+    const out = path.join(fontDir, `${safe}${ext}`);
+    await fs.writeFile(out, fontRes.body);
+    console.log(`📝 [fonts] downloaded "${family}" -> ${out} (${fontRes.body.length} bytes)`);
+    return out;
   } catch (err) {
-    console.warn('⚠️  Could not download subtitle font:', err.message);
+    console.warn(`⚠️  [fonts] could not fetch "${family}" from Google Fonts:`, err.message);
     return null;
   }
+}
+
+/**
+ * Prepare a directory libass can use to resolve the subtitle font. Handles
+ * two cases:
+ *   1. customFontKey set → download the user-uploaded font from R2.
+ *   2. fontName is a Google Font (e.g. Inter) → download the regular TTF
+ *      so the burn-in works on hosts that don't have it system-installed
+ *      (Windows dev box, slim Linux containers like Railway).
+ *
+ * Returns the absolute fonts directory path, or null when nothing was
+ * downloaded (libass will then fall back to system fonts).
+ */
+async function prepareSubtitleFontDir(settings, tmpDir) {
+  const fontDir = path.join(tmpDir, 'subtitle-fonts');
+  let downloadedAny = false;
+
+  // 1. Custom-uploaded font wins.
+  const key = settings?.customFontKey;
+  if (key && r2Service.isConfigured()) {
+    try {
+      await fs.ensureDir(fontDir);
+      const ext = path.extname(key) || '.ttf';
+      const localPath = path.join(fontDir, `userfont${ext}`);
+      await r2Service.downloadToFile(key, localPath);
+      console.log(`📝 [fonts] downloaded custom font from R2 -> ${localPath}`);
+      downloadedAny = true;
+    } catch (err) {
+      console.warn('⚠️  [fonts] could not download custom subtitle font:', err.message);
+    }
+  }
+
+  // 2. Always try Google Fonts for the requested family unless it's a
+  // system staple — this is what makes "Inter" actually render on Windows
+  // boxes where it isn't installed.
+  const family = (settings?.fontName || 'Inter').trim();
+  await fs.ensureDir(fontDir);
+  const downloaded = await downloadGoogleFont(family, fontDir);
+  if (downloaded) downloadedAny = true;
+
+  return downloadedAny ? fontDir : null;
 }
 
 /**
@@ -242,13 +335,32 @@ async function bakeVoiceIntoClip(clipPath, voicePath, outPath) {
 }
 
 async function downloadSrt(subtitlesKey, tmpDir) {
-  if (!subtitlesKey) return null;
-  const local = path.join(tmpDir, 'subtitles.srt');
-  if (r2Service.isConfigured()) {
-    await r2Service.downloadToFile(subtitlesKey, local);
-  } else {
-    await fs.copy(subtitlesKey, local);
+  if (!subtitlesKey) {
+    console.log('📝 [assembly] no subtitlesKey -- final cut will have NO captions');
+    return null;
   }
+  const local = path.join(tmpDir, 'subtitles.srt');
+  try {
+    if (r2Service.isConfigured()) {
+      await r2Service.downloadToFile(subtitlesKey, local);
+    } else {
+      await fs.copy(subtitlesKey, local);
+    }
+  } catch (err) {
+    console.warn(`⚠️  [assembly] failed to download SRT (${subtitlesKey}): ${err.message}`);
+    return null;
+  }
+  let bytes = 0;
+  let cues = 0;
+  try {
+    const stat = await fs.stat(local);
+    bytes = stat.size;
+    const text = await fs.readFile(local, 'utf8');
+    cues = (text.match(/-->/g) || []).length;
+  } catch {
+    /* size/cue logging is best-effort */
+  }
+  console.log(`📝 [assembly] SRT downloaded: ${local} (${bytes} bytes, ${cues} cues)`);
   return local;
 }
 
@@ -300,6 +412,7 @@ function runFfmpeg(label, build) {
     const cmd = ffmpeg();
     build(cmd);
     const stderrTail = [];
+    const libassNotes = [];
     cmd
       .on('start', (cli) => {
         console.log(`▶️  [assembly:${label}] ${cli}`);
@@ -307,8 +420,24 @@ function runFfmpeg(label, build) {
       .on('stderr', (line) => {
         stderrTail.push(line);
         if (stderrTail.length > 40) stderrTail.shift();
+        // Surface anything libass / subtitles related on success too --
+        // those warnings (font missing, glyphs not found, codepage
+        // fallback) explain "no captions on screen" failures that ffmpeg
+        // otherwise considers a clean exit.
+        if (
+          /libass|fontselect|font_select|Glyph .* not found|font.*not found|Could not load font|Subtitle|subtitles|\[ass /i.test(
+            line
+          )
+        ) {
+          libassNotes.push(line);
+        }
       })
       .on('end', () => {
+        if (libassNotes.length) {
+          console.log(
+            `📝 [assembly:${label}] libass notes (${libassNotes.length}):\n${libassNotes.slice(-20).join('\n')}`
+          );
+        }
         console.log(`✅ [assembly:${label}] done`);
         resolve();
       })
@@ -448,10 +577,20 @@ async function assembleFinalVideo(input) {
       const vFilters = [];
       if (colorGrade) vFilters.push(colorGrade);
       if (srtPath) {
-        vFilters.push(
-          buildSubtitleFilter(srtPath, subtitleSettings || {}, { fontsDir: subtitleFontsDir })
+        const subFilter = buildSubtitleFilter(srtPath, subtitleSettings || {}, {
+          fontsDir: subtitleFontsDir,
+        });
+        console.log(`📝 [assembly] burning subtitles via filter: ${subFilter}`);
+        console.log(
+          `📝 [assembly] subtitle fontsdir=${subtitleFontsDir || '(none)'} requested font="${(subtitleSettings && subtitleSettings.fontName) || 'Inter'}"`
         );
+        vFilters.push(subFilter);
+      } else {
+        console.log('📝 [assembly] no SRT path -- skipping subtitles filter');
       }
+      // verbose loglevel so libass font-loading warnings reach our stderr
+      // capture (silent fallback is what bit us before).
+      cmd.outputOptions(['-loglevel', 'verbose']);
 
       const filterComplexParts = [];
       if (vFilters.length > 0) {
@@ -563,6 +702,7 @@ module.exports = {
   assembleFinalVideo,
   buildSubtitleFilter,
   prepareSubtitleFontDir,
+  probeDurationSeconds,
   trimLeading,
   spliceHook,
   cleanupTmpDir,

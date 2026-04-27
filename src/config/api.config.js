@@ -1,4 +1,7 @@
-require('dotenv').config();
+const path = require('path');
+const { normalizeEnvString } = require('../utils/envString');
+
+require('dotenv').config({ path: path.resolve(__dirname, '..', '..', '.env') });
 
 /**
  * API Configuration
@@ -8,10 +11,15 @@ require('dotenv').config();
 // Anthropic accepts the official name only in docs, but people sometimes
 // use shorter aliases in .env — resolve them here so the SDK always gets
 // a concrete apiKey or fails loudly with setup instructions.
-const anthropicApiKey =
+const anthropicApiKey = normalizeEnvString(
   process.env.ANTHROPIC_API_KEY ||
-  process.env.ANTHROPIC_KEY ||
-  process.env.CLAUDE_API_KEY;
+    process.env.ANTHROPIC_KEY ||
+    process.env.CLAUDE_API_KEY
+);
+
+const assemblyAiKey =
+  normalizeEnvString(process.env.ASSEMBLYAI_API_KEY) ||
+  normalizeEnvString(process.env.ASSEMBLY_AI_API_KEY);
 
 const apiConfig = {
   // Claude API Configuration (Anthropic)
@@ -25,7 +33,7 @@ const apiConfig = {
 
   // AssemblyAI Configuration (Transcription)
   assemblyAI: {
-    apiKey: process.env.ASSEMBLYAI_API_KEY,
+    apiKey: assemblyAiKey,
     baseURL: 'https://api.assemblyai.com/v2',
     timeout: 300000, // 5 minutes
   },
@@ -94,10 +102,15 @@ if (!anthropicApiKey) {
   );
 }
 
+if (!assemblyAiKey) {
+  console.warn(
+    '⚠️  Warning: ASSEMBLYAI_API_KEY (or ASSEMBLY_AI_API_KEY) not set in the repo-root .env. AssemblyAI / cartoon subtitles will not work.'
+  );
+}
+
 const requiredKeys = {
   FAL_AI_API_KEY: 'Fal.AI',
   GENAIPRO_API_KEY: 'Genaipro.vn',
-  ASSEMBLYAI_API_KEY: 'AssemblyAI',
 };
 
 Object.entries(requiredKeys).forEach(([envKey, serviceName]) => {

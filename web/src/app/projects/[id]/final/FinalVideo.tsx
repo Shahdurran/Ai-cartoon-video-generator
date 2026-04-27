@@ -18,9 +18,27 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
   }
 
   useEffect(() => {
-    if (project.status === 'complete' && !project.outputSignedUrl) refresh();
+    // Always re-fetch on mount: the server snapshot used by Next.js may
+    // pre-date the latest assembly (e.g. subtitlesKey was null when this
+    // page was rendered but the SRT has since been uploaded). One eager
+    // refresh lets us show the new captions banner state correctly.
+    refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // While we have voice but no subtitles yet on a complete project, the
+  // assembly may still be uploading the SRT or the next /api/projects
+  // poll just hasn't returned yet. Poll a few times so the warning banner
+  // disappears on its own once subtitlesKey lands.
+  useEffect(() => {
+    const sceneHasVoice = project.scenes.some((s) => !!s.voiceKey);
+    const needSubs =
+      project.status === 'complete' && sceneHasVoice && !project.subtitlesKey;
+    if (!needSubs) return;
+    const t = setInterval(refresh, 4000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.status, project.subtitlesKey]);
 
   useEffect(() => {
     const incomplete = project.hookVariants.filter((h) => h.status === 'pending');
@@ -68,10 +86,12 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
         <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 animate-fade-in">
           <div className="font-medium mb-0.5">No subtitles were burned in</div>
           <div className="text-xs text-amber-200/80">
-            Subtitle generation needs a valid <code className="text-amber-100">ASSEMBLYAI_API_KEY</code>.
-            Get one from <a href="https://www.assemblyai.com/app" target="_blank" rel="noreferrer" className="underline">assemblyai.com</a>,
-            add it to your <code className="text-amber-100">.env</code>, restart the backend,
-            then go back to <span className="text-white">Scene videos</span> and re-assemble.
+            The Node backend reads <code className="text-amber-100">ASSEMBLYAI_API_KEY</code> from the
+            <strong className="text-amber-100"> repository root </strong>
+            <code className="text-amber-100">.env</code> (same folder as <code className="text-amber-100">server-new.js</code>),
+            not from <code className="text-amber-100">web/.env.local</code>. Get a key from{' '}
+            <a href="https://www.assemblyai.com/app" target="_blank" rel="noreferrer" className="underline">assemblyai.com</a>,
+            save, restart the backend, then use <span className="text-white">Scene videos</span> → re-assemble.
           </div>
         </div>
       )}

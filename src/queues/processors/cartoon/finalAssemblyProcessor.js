@@ -31,24 +31,22 @@ module.exports = async function finalAssemblyProcessor(job) {
       throw new Error(`${missing.length} scene(s) still missing videoKey`);
     }
 
-    // Build subtitles inline if they don't exist yet so we don't race the
-    // separate subtitles queue. Skipped silently if no scene has voice.
+    // Always rebuild the combined SRT before final concat whenever any
+    // scene has voice. That way a failed first attempt (bad key, rate
+    // limit) is retried on re-assemble, and timings stay aligned with the
+    // current voice MP3s after any voice re-gen.
     const hasAnyVoice = scenes.some((s) => !!s.voiceKey);
-    if (!project.subtitlesKey && hasAnyVoice) {
+    if (hasAnyVoice) {
       try {
         console.log(`📝 [assembly] Generating subtitles for project ${projectId} (AssemblyAI)…`);
         await subtitlesProcessor({ data: { projectId } });
-        // Reload so subtitlesKey is fresh on the project record.
         project = await projectRepo.findById(projectId);
         if (project.subtitlesKey) {
           console.log(`✅ [assembly] Subtitles ready: ${project.subtitlesKey}`);
         }
       } catch (err) {
-        // Surface the failure as a visible warning on the project so the
-        // user can see *why* their captions are missing from the final
-        // cut (most often a missing/invalid ASSEMBLYAI_API_KEY).
         const detail = err.message?.includes('Authentication')
-          ? 'Subtitles skipped: ASSEMBLYAI_API_KEY is missing or invalid. Add a valid key from https://www.assemblyai.com/app and re-assemble.'
+          ? 'Subtitles skipped: ASSEMBLYAI_API_KEY is missing or invalid. Put it in the repo-root .env (not web/.env.local), restart the backend, then re-assemble.'
           : `Subtitles skipped: ${err.message}`;
         console.warn(`⚠️  ${detail}`);
         await pubsub.publish(projectId, {
@@ -57,9 +55,7 @@ module.exports = async function finalAssemblyProcessor(job) {
           error: detail,
         });
       }
-    } else if (project.subtitlesKey) {
-      console.log(`📝 [assembly] Reusing existing subtitles: ${project.subtitlesKey}`);
-    } else if (!hasAnyVoice) {
+    } else {
       console.log('📝 [assembly] No voice on any scene — skipping subtitles.');
     }
 

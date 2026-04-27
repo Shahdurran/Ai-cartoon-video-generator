@@ -3,7 +3,10 @@
  * Starts the Express server with Bull queue support
  */
 
-require('dotenv').config();
+const path = require('path');
+// Always load repo-root .env (not cwd) so keys work when the server is
+// started from another directory.
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 const app = require('./src/app');
 const { closeQueues } = require('./src/queues');
 
