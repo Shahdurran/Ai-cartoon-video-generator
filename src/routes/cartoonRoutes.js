@@ -43,6 +43,9 @@ router.get('/styles', styleController.list);
 router.get('/styles/:id', styleController.get);
 
 router.get('/voices', cartoonVoiceController.list);
+router.get('/voices/favorites', cartoonVoiceController.listFavorites);
+router.post('/voices/:voiceId/favorite', cartoonVoiceController.addFavorite);
+router.delete('/voices/:voiceId/favorite', cartoonVoiceController.removeFavorite);
 
 router.get('/music', cartoonMusicController.list);
 router.get('/music/:id', cartoonMusicController.get);
@@ -57,6 +60,13 @@ router.put('/projects/:id/scenes', projectController.replaceScenes);
 router.post('/projects/:id/regenerate-script', projectController.regenerateScript);
 router.post('/projects/:id/approve-script', projectController.approveScript);
 
+// Per-scene patch (used by the global Scenes drawer; safe in any state up
+// to and including images-review/-ready).
+router.patch(
+  '/projects/:id/scenes/:sceneId',
+  projectController.patchScene
+);
+
 router.patch(
   '/projects/:id/scenes/:sceneId/select-image',
   projectController.selectImage
@@ -69,6 +79,19 @@ router.post(
   '/projects/:id/scenes/:sceneId/upload-image',
   projectController.upload.single('image'),
   projectController.uploadImage
+);
+router.post(
+  '/projects/:id/scenes/:sceneId/product-reference',
+  projectController.upload.single('image'),
+  projectController.uploadProductReference
+);
+router.delete(
+  '/projects/:id/scenes/:sceneId/product-reference',
+  projectController.deleteProductReference
+);
+router.post(
+  '/projects/:id/scenes/:sceneId/product-reference/apply-to-all',
+  projectController.applyProductReferenceToAll
 );
 router.post(
   '/projects/:id/subtitle-font',

@@ -30,6 +30,7 @@ const {
   DeleteObjectCommand,
   ListObjectsV2Command,
   HeadObjectCommand,
+  CopyObjectCommand,
 } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
@@ -118,6 +119,19 @@ async function del(key) {
   await getClient().send(
     new DeleteObjectCommand({ Bucket: bucketName(), Key: key })
   );
+}
+
+async function copy(srcKey, dstKey) {
+  const bucket = bucketName();
+  await getClient().send(
+    new CopyObjectCommand({
+      Bucket: bucket,
+      // CopySource is `<bucket>/<key>` (URL-encoded) per S3 spec.
+      CopySource: encodeURIComponent(`${bucket}/${srcKey}`),
+      Key: dstKey,
+    })
+  );
+  return { key: dstKey, bucket };
 }
 
 async function exists(key) {
@@ -214,12 +228,15 @@ const keys = {
   musicTrack: (name) => `music-library/${name}`,
   customUpload: (projectId, sceneId, filename) =>
     `projects/${projectId}/scenes/${sceneId}/upload-${Date.now()}-${filename}`,
+  productReference: (projectId, sceneId, ext = 'png') =>
+    `projects/${projectId}/scenes/${sceneId}/product-reference.${ext}`,
 };
 
 module.exports = {
   isConfigured,
   upload,
   uploadFromPath,
+  copy,
   getSignedUrl: getSignedDownloadUrl,
   getSignedDownloadUrl,
   getSignedUploadUrl,

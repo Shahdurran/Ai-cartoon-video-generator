@@ -109,6 +109,7 @@ async function hydrateProjectDetailed(project) {
         imageVariants: await hydrateImageVariants(images),
         voiceSignedUrl: await urlFor(scene.voiceKey),
         videoSignedUrl: await urlFor(scene.videoKey),
+        productReferenceSignedUrl: await urlFor(scene.productReferenceKey),
       };
     })
   );
@@ -200,7 +201,9 @@ async function list(req, res, next) {
   try {
     const limit = Math.min(200, parseInt(req.query.limit || '50', 10));
     const offset = parseInt(req.query.offset || '0', 10);
-    const projects = await projectRepo.list({ limit, offset });
+    // listWithProgress joins scene-level counters so the home page can
+    // render "Generating 3/8 images" badges without an N+1 fetch.
+    const projects = await projectRepo.listWithProgress({ limit, offset });
     res.json({ projects });
   } catch (err) {
     next(err);
@@ -295,6 +298,182 @@ async function regenerateImage(req, res, next) {
     });
 
     res.json({ enqueued: true, jobId: job.id });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Patch a single scene's editable fields (voiceoverText, imagePrompt,
+ * durationSeconds) without touching its image variants, voice, or video.
+ *
+ * Used by the global Scenes drawer so the user can tweak narration / prompt
+ * for one scene at a time after image generation has started. Allowed in
+ * any state up to (but not including) video generation -- changing scene
+ * length once Seedance is rendering would desync the timeline.
+ *
+ * Returns the updated scene with hydrated image / voice / video URLs.
+ */
+async function patchScene(req, res, next) {
+  try {
+    const { id: projectId, sceneId } = req.params;
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const scene = await sceneRepo.findById(sceneId);
+    if (!scene || scene.projectId !== projectId) {
+      return res.status(404).json({ error: 'Scene not found' });
+    }
+
+    const lockedStates = new Set(['generating', 'assembling']);
+    if (lockedStates.has(project.status)) {
+      return res.status(409).json({
+        error: `Cannot edit scene while project status is '${project.status}'`,
+      });
+    }
+
+    const { imagePrompt, voiceoverText, durationSeconds } = req.body || {};
+    const fields = {};
+    if (typeof imagePrompt === 'string') fields.imagePrompt = imagePrompt.trim();
+    if (typeof voiceoverText === 'string') fields.voiceoverText = voiceoverText.trim();
+    if (durationSeconds != null) {
+      const n = Number(durationSeconds);
+      if (!Number.isFinite(n) || n <= 0) {
+        return res.status(400).json({ error: 'durationSeconds must be > 0' });
+      }
+      fields.durationSeconds = n;
+    }
+
+    if (Object.keys(fields).length === 0) {
+      return res.status(400).json({ error: 'No editable fields supplied' });
+    }
+
+    const updated = await sceneRepo.patchFields(sceneId, fields);
+    const images = await sceneImageRepo.findByScene(sceneId);
+    res.json({
+      scene: {
+        ...updated,
+        imageVariants: await hydrateImageVariants(images),
+        voiceSignedUrl: await urlFor(updated.voiceKey),
+        videoSignedUrl: await urlFor(updated.videoKey),
+        productReferenceSignedUrl: await urlFor(updated.productReferenceKey),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Upload (or replace) the product reference image for a single scene.
+ * Stored on R2 at a stable per-scene key so re-uploading overwrites.
+ *
+ * The reference is consumed by image generation as `image_url` (Higgsfield
+ * Soul) or as image-to-image input where supported, so the product appears
+ * consistently across regenerations of the scene.
+ */
+async function uploadProductReference(req, res, next) {
+  try {
+    const { id: projectId, sceneId } = req.params;
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const scene = await sceneRepo.findById(sceneId);
+    if (!scene || scene.projectId !== projectId) {
+      return res.status(404).json({ error: 'Scene not found' });
+    }
+    if (!r2Service.isConfigured()) {
+      return res.status(503).json({ error: 'Object storage is not configured' });
+    }
+
+    // Pick extension from the uploaded mime type; fall back to .png.
+    const mime = (file.mimetype || '').toLowerCase();
+    const ext = mime.includes('jpeg') || mime.includes('jpg')
+      ? 'jpg'
+      : mime.includes('webp')
+        ? 'webp'
+        : 'png';
+
+    const key = r2Service.keys.productReference(projectId, sceneId, ext);
+    await r2Service.upload(key, file.buffer, file.mimetype || 'image/png');
+
+    const updated = await sceneRepo.setProductReferenceKey(sceneId, key);
+    res.json({
+      scene: {
+        ...updated,
+        productReferenceSignedUrl: await urlFor(key),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Remove the product reference image for a single scene (no R2 delete). */
+async function deleteProductReference(req, res, next) {
+  try {
+    const { id: projectId, sceneId } = req.params;
+    const scene = await sceneRepo.findById(sceneId);
+    if (!scene || scene.projectId !== projectId) {
+      return res.status(404).json({ error: 'Scene not found' });
+    }
+    if (scene.productReferenceKey && r2Service.isConfigured()) {
+      // Fire-and-forget; if it fails we still null the column.
+      r2Service.del(scene.productReferenceKey).catch(() => {});
+    }
+    const updated = await sceneRepo.setProductReferenceKey(sceneId, null);
+    res.json({
+      scene: {
+        ...updated,
+        productReferenceSignedUrl: null,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Copy this scene's product reference image onto every other scene in the
+ * same project. Each destination gets its own R2 object (stable per-scene
+ * key) so per-scene overrides remain possible later.
+ */
+async function applyProductReferenceToAll(req, res, next) {
+  try {
+    const { id: projectId, sceneId } = req.params;
+    const sourceScene = await sceneRepo.findById(sceneId);
+    if (!sourceScene || sourceScene.projectId !== projectId) {
+      return res.status(404).json({ error: 'Scene not found' });
+    }
+    if (!sourceScene.productReferenceKey) {
+      return res.status(400).json({ error: 'Source scene has no product reference image' });
+    }
+    if (!r2Service.isConfigured()) {
+      return res.status(503).json({ error: 'Object storage is not configured' });
+    }
+
+    // Preserve the source extension by copying it from the source key.
+    const srcKey = sourceScene.productReferenceKey;
+    const m = srcKey.match(/\.([a-z0-9]+)$/i);
+    const ext = (m ? m[1] : 'png').toLowerCase();
+
+    const others = (await sceneRepo.findByProject(projectId)).filter(
+      (s) => s.id !== sceneId
+    );
+
+    let copied = 0;
+    for (const target of others) {
+      const dstKey = r2Service.keys.productReference(projectId, target.id, ext);
+      try {
+        await r2Service.copy(srcKey, dstKey);
+        await sceneRepo.setProductReferenceKey(target.id, dstKey);
+        copied += 1;
+      } catch (err) {
+        console.error(`Failed to copy product reference to scene ${target.id}:`, err.message);
+      }
+    }
+
+    res.json({ updated: copied });
   } catch (err) {
     next(err);
   }
@@ -542,8 +721,16 @@ async function regenerateScript(req, res, next) {
 
 /**
  * Approve the AI-generated scenes and kick off per-scene image generation.
- * Moves status from 'script-review' to 'images-pending' and enqueues one
- * image job per scene. The user lands on the image-picker page next.
+ * Moves status to 'images-pending' and enqueues image jobs.
+ *
+ * Idempotent by design: if the project has progressed past script-review,
+ * we only enqueue scenes that don't already have image variants OR whose
+ * stored `image_prompt` has changed since the last generation. This is
+ * what fixes the "navigated back to script and now everything regenerates"
+ * bug -- repeated approvals are now no-ops unless something actually changed.
+ *
+ * Pass `force: true` in the body to bypass the dedupe and regenerate every
+ * scene's variants (used by an explicit "Regenerate all images" action).
  */
 async function approveScript(req, res, next) {
   try {
@@ -551,7 +738,15 @@ async function approveScript(req, res, next) {
     const project = await projectRepo.findById(projectId);
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
-    const validFromStates = new Set(['scripted', 'script-review']);
+    // Allow re-approval from any post-script state. The dedupe below makes
+    // it safe; only scenes with mismatched prompts (or no variants) requeue.
+    const validFromStates = new Set([
+      'scripted',
+      'script-review',
+      'images-pending',
+      'images-review',
+      'images-ready',
+    ]);
     if (!validFromStates.has(project.status)) {
       return res.status(409).json({
         error: `Cannot approve script when project status is '${project.status}'`,
@@ -567,26 +762,65 @@ async function approveScript(req, res, next) {
       Math.max(parseInt(req.body?.variantCount, 10) || 3, 1),
       6
     );
+    const force = req.body?.force === true;
 
-    await projectRepo.updateStatus(projectId, 'images-pending');
+    // Decide which scenes to enqueue. A scene is enqueued when forced, when
+    // it has no variants yet, or when its current image_prompt differs from
+    // the prompt used to generate any of its existing variants.
+    const toEnqueue = [];
+    const skipped = [];
 
     for (const s of scenes) {
+      if (force) {
+        toEnqueue.push({ scene: s, clearExisting: true });
+        continue;
+      }
+      const variants = await sceneImageRepo.findByScene(s.id);
+      if (variants.length === 0) {
+        toEnqueue.push({ scene: s, clearExisting: false });
+        continue;
+      }
+      const promptChanged = variants.every(
+        (v) => (v.promptUsed || '') !== (s.imagePrompt || '')
+      );
+      if (promptChanged) {
+        toEnqueue.push({ scene: s, clearExisting: true });
+      } else {
+        skipped.push(s.id);
+      }
+    }
+
+    // Only flip status back to images-pending if we actually have work to
+    // do; otherwise leave the existing status (images-review/images-ready)
+    // alone so the UI doesn't blink back into "generating".
+    if (toEnqueue.length > 0) {
+      await projectRepo.updateStatus(projectId, 'images-pending');
+    }
+
+    for (const item of toEnqueue) {
       await queues.sceneImages.add('generate-variants', {
         projectId,
-        sceneId: s.id,
-        prompt: s.imagePrompt,
+        sceneId: item.scene.id,
+        prompt: item.scene.imagePrompt,
         variantCount,
-        clearExisting: false,
+        clearExisting: item.clearExisting,
       });
     }
 
-    await pubsub.publish(projectId, {
-      phase: 'images',
-      status: 'started',
+    if (toEnqueue.length > 0) {
+      await pubsub.publish(projectId, {
+        phase: 'images',
+        status: 'started',
+        sceneCount: toEnqueue.length,
+      });
+    }
+
+    res.json({
+      enqueued: toEnqueue.length > 0,
+      enqueuedCount: toEnqueue.length,
+      skippedCount: skipped.length,
       sceneCount: scenes.length,
     });
-
-    res.json({ enqueued: true, sceneCount: scenes.length });
   } catch (err) {
     next(err);
   }
@@ -738,7 +972,9 @@ async function statusStream(req, res, next) {
 module.exports = {
   create, list, get, patch, remove,
   replaceScenes, regenerateScript, approveScript,
+  patchScene,
   selectImage, regenerateImage, uploadImage, uploadSubtitleFont,
+  uploadProductReference, deleteProductReference, applyProductReferenceToAll,
   generateSceneVoice,
   regenerateSceneVideo,
   regenerateSubtitles,

@@ -72,6 +72,72 @@ async function list({ limit = 50, offset = 0 } = {}) {
 }
 
 /**
+ * List projects with per-project scene progress counters joined in. Used
+ * by the home page so the user can see "Generating 3/8 images" and
+ * similar without opening each project.
+ *
+ * Returns the same shape as `list()` but with extra fields:
+ *   sceneProgress: {
+ *     total, withImages, picked, failed, withVideo, queued
+ *   }
+ */
+async function listWithProgress({ limit = 50, offset = 0 } = {}) {
+  const { rows } = await query(
+    `WITH scene_stats AS (
+       SELECT
+         s.project_id,
+         COUNT(*)                                                     AS total,
+         COUNT(*) FILTER (WHERE EXISTS (
+           SELECT 1 FROM scene_images si WHERE si.scene_id = s.id
+         ))                                                           AS with_images,
+         COUNT(*) FILTER (WHERE s.selected_image_id IS NOT NULL)      AS picked,
+         COUNT(*) FILTER (WHERE s.status = 'failed')                  AS failed,
+         COUNT(*) FILTER (WHERE s.video_key IS NOT NULL)              AS with_video,
+         COUNT(*) FILTER (WHERE
+           s.status IN ('pending', 'image-pending', 'voice-pending', 'video-pending')
+         )                                                            AS queued
+       FROM scenes s
+       GROUP BY s.project_id
+     )
+     SELECT ${SELECT_COLUMNS},
+            COALESCE(ss.total, 0)        AS "scenesTotal",
+            COALESCE(ss.with_images, 0)  AS "scenesWithImages",
+            COALESCE(ss.picked, 0)       AS "scenesPicked",
+            COALESCE(ss.failed, 0)       AS "scenesFailed",
+            COALESCE(ss.with_video, 0)   AS "scenesWithVideo",
+            COALESCE(ss.queued, 0)       AS "scenesQueued"
+     FROM projects p
+     LEFT JOIN scene_stats ss ON ss.project_id = p.id
+     ORDER BY p.created_at DESC
+     LIMIT $1 OFFSET $2`,
+    [limit, offset]
+  );
+
+  return rows.map((r) => {
+    const {
+      scenesTotal,
+      scenesWithImages,
+      scenesPicked,
+      scenesFailed,
+      scenesWithVideo,
+      scenesQueued,
+      ...project
+    } = r;
+    return {
+      ...project,
+      sceneProgress: {
+        total: Number(scenesTotal) || 0,
+        withImages: Number(scenesWithImages) || 0,
+        picked: Number(scenesPicked) || 0,
+        failed: Number(scenesFailed) || 0,
+        withVideo: Number(scenesWithVideo) || 0,
+        queued: Number(scenesQueued) || 0,
+      },
+    };
+  });
+}
+
+/**
  * Partial update. Accepts a subset of fields matching the project shape.
  */
 async function update(id, patch) {
@@ -136,4 +202,12 @@ async function remove(id) {
   await query('DELETE FROM projects WHERE id = $1', [id]);
 }
 
-module.exports = { create, findById, list, update, updateStatus, remove };
+module.exports = {
+  create,
+  findById,
+  list,
+  listWithProgress,
+  update,
+  updateStatus,
+  remove,
+};

@@ -11,6 +11,7 @@ const SELECT_COLUMNS = `
   selected_image_id AS "selectedImageId",
   voice_key AS "voiceKey", video_key AS "videoKey",
   fal_request_id AS "falRequestId",
+  product_reference_key AS "productReferenceKey",
   status, error_message AS "errorMessage", error_code AS "errorCode",
   created_at AS "createdAt"
 `;
@@ -137,6 +138,72 @@ async function setVoiceKey(sceneId, voiceKey) {
   );
 }
 
+/**
+ * Patch one or more editable fields on a single scene without disturbing
+ * its image variants, voice, or video. Used by the global Scenes drawer
+ * after image generation has started so users can tweak narration / prompt
+ * / duration of one scene at a time.
+ *
+ * Pass `null` for any field to leave it unchanged. `productReferenceKey`
+ * accepts the empty string to explicitly clear the reference.
+ */
+async function patchFields(sceneId, fields) {
+  const sets = [];
+  const args = [sceneId];
+  let i = 2;
+
+  if (typeof fields.imagePrompt === 'string') {
+    sets.push(`image_prompt = $${i++}`);
+    args.push(fields.imagePrompt);
+  }
+  if (typeof fields.voiceoverText === 'string') {
+    sets.push(`voiceover_text = $${i++}`);
+    args.push(fields.voiceoverText);
+  }
+  if (fields.durationSeconds != null) {
+    sets.push(`duration_seconds = $${i++}`);
+    args.push(Number(fields.durationSeconds));
+  }
+  if (fields.productReferenceKey !== undefined) {
+    sets.push(`product_reference_key = $${i++}`);
+    args.push(fields.productReferenceKey || null);
+  }
+
+  if (sets.length === 0) return findById(sceneId);
+
+  const { rows } = await query(
+    `UPDATE scenes SET ${sets.join(', ')}
+     WHERE id = $1
+     RETURNING ${SELECT_COLUMNS}`,
+    args
+  );
+  return rows[0] || null;
+}
+
+async function setProductReferenceKey(sceneId, key) {
+  const { rows } = await query(
+    `UPDATE scenes SET product_reference_key = $2
+     WHERE id = $1
+     RETURNING ${SELECT_COLUMNS}`,
+    [sceneId, key || null]
+  );
+  return rows[0] || null;
+}
+
+async function setProductReferenceForProject(projectId, key, exceptSceneId) {
+  const params = [projectId, key || null];
+  let where = 'project_id = $1';
+  if (exceptSceneId) {
+    where += ' AND id <> $3';
+    params.push(exceptSceneId);
+  }
+  const { rowCount } = await query(
+    `UPDATE scenes SET product_reference_key = $2 WHERE ${where}`,
+    params
+  );
+  return rowCount;
+}
+
 async function countByStatus(projectId, status) {
   const { rows } = await query(
     `SELECT COUNT(*)::int AS count FROM scenes WHERE project_id = $1 AND status = $2`,
@@ -159,6 +226,9 @@ module.exports = {
   setFalRequestId,
   setVideoKey,
   setVoiceKey,
+  patchFields,
+  setProductReferenceKey,
+  setProductReferenceForProject,
   countByStatus,
   deleteByProject,
 };

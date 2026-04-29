@@ -13,6 +13,10 @@ type Props = {
   voice: Voice;
   selected: boolean;
   onSelect: () => void;
+  /** Toggle this voice's "favorite" state. When omitted, the star button is hidden. */
+  onToggleFavorite?: () => void;
+  /** Optimistic favorite override (for instant visual feedback). */
+  isFavorite?: boolean;
 };
 
 // Shared so that starting one preview stops whichever one is currently playing.
@@ -24,7 +28,14 @@ function setCurrentlyPlaying(audio: HTMLAudioElement | null) {
   playingSubscribers.forEach((cb) => cb(audio));
 }
 
-export function VoicePreviewCard({ voice, selected, onSelect }: Props) {
+export function VoicePreviewCard({
+  voice,
+  selected,
+  onSelect,
+  onToggleFavorite,
+  isFavorite,
+}: Props) {
+  const fav = isFavorite ?? voice.isFavorite ?? false;
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -124,8 +135,36 @@ export function VoicePreviewCard({ voice, selected, onSelect }: Props) {
         <span className="pointer-events-none absolute inset-0 rounded-2xl ring-2 ring-brand-400/40 animate-fade-in" />
       )}
 
+      {onToggleFavorite && (
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label={fav ? 'Unfavorite voice' : 'Favorite voice'}
+          aria-pressed={fav}
+          title={fav ? 'Remove from favorites' : 'Add to favorites'}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleFavorite();
+            }
+          }}
+          className={`absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border text-[14px] transition cursor-pointer ${
+            fav
+              ? 'border-amber-300/40 bg-amber-300/10 text-amber-200 hover:bg-amber-300/15'
+              : 'border-white/10 text-white/40 hover:border-white/25 hover:text-white/80'
+          }`}
+        >
+          {fav ? '★' : '☆'}
+        </span>
+      )}
+
       {/* Row 1: play + text gets full width so labels are not clipped by WaveBars */}
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-3 pr-9">
         <div
           onClick={togglePlay}
           role="button"

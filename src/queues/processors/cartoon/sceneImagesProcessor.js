@@ -14,7 +14,28 @@ const sceneRepo = require('../../../db/repositories/sceneRepo');
 const sceneImageRepo = require('../../../db/repositories/sceneImageRepo');
 const projectRepo = require('../../../db/repositories/projectRepo');
 const styleRepo = require('../../../db/repositories/styleRepo');
+const r2Service = require('../../../services/r2Service');
 const pubsub = require('../../../services/pubsubService');
+
+/**
+ * Mint a URL the image provider can reach. Prefer the R2 public CDN URL
+ * if configured (faster, free egress) and fall back to a presigned URL
+ * with a 1-hour TTL -- well over the typical generation time.
+ */
+async function resolvePublicishUrl(key) {
+  if (!key || !r2Service.isConfigured()) return null;
+  const optOut = process.env.R2_USE_PUBLIC_CDN;
+  const useCdn = !(optOut === '0' || optOut === 'false' || optOut === 'no');
+  if (useCdn) {
+    const pub = r2Service.publicUrl(key);
+    if (pub) return pub;
+  }
+  try {
+    return await r2Service.getSignedDownloadUrl(key, 3600);
+  } catch {
+    return null;
+  }
+}
 
 async function maybeMarkImagesReady(projectId) {
   const project = await projectRepo.findById(projectId);
@@ -65,6 +86,8 @@ module.exports = async function sceneImagesProcessor(job) {
       await sceneRepo.updateSelectedImage(sceneId, null);
     }
 
+    const productReferenceUrl = await resolvePublicishUrl(scene.productReferenceKey);
+
     const variants = await cartoonImage.generateSceneVariants({
       projectId,
       sceneId,
@@ -72,6 +95,7 @@ module.exports = async function sceneImagesProcessor(job) {
       style,
       variantCount,
       imageModelSettings: project.imageModelSettings || {},
+      productReferenceUrl,
     });
 
     await sceneImageRepo.bulkCreate(sceneId, variants);

@@ -25,20 +25,77 @@ export function VoiceoverPanel({
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Optimistic favorites: start from server-provided flags, allow instant
+  // toggle without waiting for the round-trip. The set is the source of
+  // truth while the panel is mounted; the next listVoices() will reconcile.
+  const [favorites, setFavorites] = useState<Set<string>>(() => {
+    const s = new Set<string>();
+    voices.forEach((v) => {
+      if (v.isFavorite) s.add(v.voiceId);
+    });
+    return s;
+  });
+
   useEffect(() => {
     setVoiceId(currentVoiceId || '');
   }, [currentVoiceId]);
 
+  // If the parent re-renders with fresh `voices` (after a save / SSE
+  // refresh), sync the favorites Set so star state reflects the server.
+  useEffect(() => {
+    setFavorites((prev) => {
+      const next = new Set<string>();
+      voices.forEach((v) => {
+        if (v.isFavorite || prev.has(v.voiceId)) next.add(v.voiceId);
+      });
+      return next;
+    });
+  }, [voices]);
+
+  async function toggleFavorite(voiceIdToToggle: string) {
+    const wasFav = favorites.has(voiceIdToToggle);
+    // Optimistic UI: flip immediately, revert on error.
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (wasFav) next.delete(voiceIdToToggle);
+      else next.add(voiceIdToToggle);
+      return next;
+    });
+    try {
+      if (wasFav) await api.unfavoriteVoice(voiceIdToToggle);
+      else await api.favoriteVoice(voiceIdToToggle);
+    } catch {
+      setFavorites((prev) => {
+        const next = new Set(prev);
+        if (wasFav) next.add(voiceIdToToggle);
+        else next.delete(voiceIdToToggle);
+        return next;
+      });
+    }
+  }
+
   const filtered = useMemo(() => {
-    if (!query.trim()) return voices;
-    const q = query.toLowerCase();
-    return voices.filter(
-      (v) =>
-        v.name.toLowerCase().includes(q) ||
-        v.category?.toLowerCase().includes(q) ||
-        Object.values(v.labels || {}).some((l) => l?.toLowerCase().includes(q))
-    );
-  }, [voices, query]);
+    const q = query.trim().toLowerCase();
+    const matches = q
+      ? voices.filter(
+          (v) =>
+            v.name.toLowerCase().includes(q) ||
+            v.category?.toLowerCase().includes(q) ||
+            Object.values(v.labels || {}).some((l) => l?.toLowerCase().includes(q))
+        )
+      : voices.slice();
+
+    // Pin favorites to the top, preserving the original order within each
+    // group so the user's mental map of the list stays stable.
+    matches.sort((a, b) => {
+      const aFav = favorites.has(a.voiceId) ? 1 : 0;
+      const bFav = favorites.has(b.voiceId) ? 1 : 0;
+      return bFav - aFav;
+    });
+    return matches;
+  }, [voices, query, favorites]);
+
+  const favoriteCount = favorites.size;
 
   async function save() {
     setSaving(true);
@@ -66,6 +123,9 @@ export function VoiceoverPanel({
         <h3 className="font-medium text-white">Voiceover</h3>
         <span className="text-[11px] text-ink-200/70">
           {voices.length} voice{voices.length === 1 ? '' : 's'}
+          {favoriteCount > 0 && (
+            <span className="ml-2 text-amber-200/80">★ {favoriteCount}</span>
+          )}
         </span>
       </div>
 
@@ -92,6 +152,8 @@ export function VoiceoverPanel({
                 voice={v}
                 selected={voiceId === v.voiceId}
                 onSelect={() => setVoiceId(v.voiceId)}
+                isFavorite={favorites.has(v.voiceId)}
+                onToggleFavorite={() => toggleFavorite(v.voiceId)}
               />
             </div>
           ))}

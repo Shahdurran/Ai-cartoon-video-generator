@@ -143,7 +143,14 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
     }
   }
 
-  async function approveAndGenerate() {
+  // True once images have been generated at least once. We use this both
+  // to gate the "force regenerate" UI and to confirm before re-approving.
+  const hasExistingImages = useMemo(
+    () => project.scenes.some((s) => (s.imageVariants?.length || 0) > 0),
+    [project.scenes]
+  );
+
+  async function approveAndGenerate(opts: { force?: boolean } = {}) {
     setError(null);
     setBusy('approve');
     try {
@@ -153,12 +160,43 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
           scenes.map(({ key: _key, ...rest }) => rest) // eslint-disable-line @typescript-eslint/no-unused-vars
         );
       }
-      await api.approveScript(project.id, { variantCount: 3 });
+      const result = await api.approveScript(project.id, {
+        variantCount: 3,
+        force: opts.force === true,
+      });
+      // If the backend deduped everything (no scene actually changed) just
+      // bounce the user to the images step without flashing a "regenerating"
+      // banner -- their existing variants are still good.
+      if (!result.enqueued) {
+        router.push(`/projects/${project.id}?stay=1`);
+        return;
+      }
       router.push(`/projects/${project.id}`);
     } catch (err: any) {
       setError(err.message || 'Failed to approve script');
       setBusy(null);
     }
+  }
+
+  function handleApproveClick() {
+    // Re-approving with existing images is allowed and idempotent on the
+    // backend, but warn the user the first time around so they know they
+    // are about to discard any image work for scenes whose prompts changed.
+    if (hasExistingImages && dirty) {
+      const ok = confirm(
+        'You changed scenes that already have images. Approving will regenerate images for those scenes (others will be kept). Continue?'
+      );
+      if (!ok) return;
+    }
+    approveAndGenerate();
+  }
+
+  async function regenerateAllImages() {
+    const ok = confirm(
+      'Regenerate ALL scene images from scratch? Existing variants will be deleted.'
+    );
+    if (!ok) return;
+    approveAndGenerate({ force: true });
   }
 
   // Loading state while Claude is still writing.
@@ -190,19 +228,38 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
       (s) => s.imagePrompt.trim() && s.voiceoverText.trim() && s.durationSeconds > 0
     );
 
-  // Once the project has progressed past script-review, the script
-  // editor is read-only -- the user can browse it via the step nav for
-  // reference but mutating scenes after image gen would orphan assets.
-  const editableStates = new Set(['draft', 'scripted', 'script-review']);
+  // Editing the script is allowed during image gen too -- approving again
+  // is now idempotent on the backend and only re-runs scenes whose prompts
+  // actually changed. Once we move on to video generation we hard-lock the
+  // editor because mutating scenes mid-Seedance would orphan video clips.
+  const editableStates = new Set([
+    'draft',
+    'scripted',
+    'script-review',
+    'images-pending',
+    'images-review',
+    'images-ready',
+  ]);
   const locked = !editableStates.has(project.status);
+  const inImagesPhase =
+    project.status === 'images-pending' ||
+    project.status === 'images-review' ||
+    project.status === 'images-ready';
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-2 space-y-6">
       {locked && (
         <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200 animate-fade-in">
-          Script is locked because the project has progressed past the
-          script-review stage. Viewing in read-only mode.
+          Script is locked because the project has reached video generation.
+          Viewing in read-only mode.
+        </div>
+      )}
+      {!locked && inImagesPhase && (
+        <div className="rounded-xl border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-xs text-sky-100 animate-fade-in">
+          Images have already been generated. Editing a scene&rsquo;s narration or
+          prompt and re-approving will <span className="text-white font-medium">only regenerate images for the scenes you changed</span>.
+          Use <span className="text-white font-medium">Regenerate all images</span> to redo every scene from scratch.
         </div>
       )}
       <div className="glass-panel flex items-center justify-between gap-4 animate-fade-up flex-wrap">
@@ -232,20 +289,37 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
           >
             {busy === 'save' ? 'Saving…' : 'Save edits'}
           </button>
+          {inImagesPhase && !locked && (
+            <button
+              type="button"
+              onClick={regenerateAllImages}
+              disabled={busy !== null || !canApprove}
+              className="btn-ghost !px-3 !py-1.5 !text-xs"
+              title="Force regenerate every scene's images"
+            >
+              {busy === 'approve' ? 'Working…' : 'Regenerate all images'}
+            </button>
+          )}
           <button
             type="button"
-            onClick={approveAndGenerate}
+            onClick={handleApproveClick}
             disabled={busy !== null || !canApprove || locked}
             className="btn-primary !px-4 !py-2 !text-xs"
             title={
               locked
                 ? 'Script can no longer be approved -- project is past this stage'
                 : canApprove
-                  ? 'Approve scenes and start generating images'
+                  ? inImagesPhase
+                    ? 'Save changes and regenerate images for changed scenes'
+                    : 'Approve scenes and start generating images'
                   : 'Every scene needs a prompt and narration first'
             }
           >
-            {busy === 'approve' ? 'Approving…' : 'Approve & generate images →'}
+            {busy === 'approve'
+              ? 'Approving…'
+              : inImagesPhase
+                ? 'Save & update images →'
+                : 'Approve & generate images →'}
           </button>
         </div>
       </div>

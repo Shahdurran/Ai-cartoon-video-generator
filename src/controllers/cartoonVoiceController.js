@@ -3,10 +3,15 @@
  * cartoon Next.js UI.
  *
  * Routes:
- *   GET /api/voices       -- list ElevenLabs voices
+ *   GET    /api/voices                     -- list ElevenLabs voices
+ *                                            (each voice has `isFavorite`)
+ *   POST   /api/voices/:voiceId/favorite   -- star
+ *   DELETE /api/voices/:voiceId/favorite   -- unstar
+ *   GET    /api/voices/favorites           -- list favorited voice IDs
  */
 
 const elevenLabs = require('../services/elevenLabsService');
+const voiceFavoriteRepo = require('../db/repositories/voiceFavoriteRepo');
 
 async function list(req, res, next) {
   try {
@@ -16,8 +21,13 @@ async function list(req, res, next) {
         voices: [],
       });
     }
-    const voices = await elevenLabs.listVoices();
-    res.json({ voices });
+    const [voices, favoriteIds] = await Promise.all([
+      elevenLabs.listVoices(),
+      voiceFavoriteRepo.listIds().catch(() => []),
+    ]);
+    const favSet = new Set(favoriteIds);
+    const annotated = voices.map((v) => ({ ...v, isFavorite: favSet.has(v.voiceId) }));
+    res.json({ voices: annotated });
   } catch (err) {
     // Surface auth/quota issues with a clean 503 + actionable copy instead of
     // leaking a stack trace to the UI.
@@ -45,4 +55,35 @@ async function list(req, res, next) {
   }
 }
 
-module.exports = { list };
+async function listFavorites(_req, res, next) {
+  try {
+    const ids = await voiceFavoriteRepo.listIds();
+    res.json({ voiceIds: ids });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function addFavorite(req, res, next) {
+  try {
+    const { voiceId } = req.params;
+    if (!voiceId) return res.status(400).json({ error: 'voiceId required' });
+    await voiceFavoriteRepo.add(voiceId);
+    res.json({ voiceId, isFavorite: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function removeFavorite(req, res, next) {
+  try {
+    const { voiceId } = req.params;
+    if (!voiceId) return res.status(400).json({ error: 'voiceId required' });
+    await voiceFavoriteRepo.remove(voiceId);
+    res.json({ voiceId, isFavorite: false });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { list, listFavorites, addFavorite, removeFavorite };

@@ -4,6 +4,8 @@
  */
 
 const DEFAULT_IMAGE_MODEL_SETTINGS = {
+  /** higgsfield | fal — project UI overrides IMAGE_PROVIDER when present */
+  imageProvider: 'higgsfield',
   /** Primary cascade preference: nano-banana-2 | flux-dev */
   preferredCascade: 'nano-banana-2',
   /** Fal endpoint id for Nano Banana 2 text-to-image */

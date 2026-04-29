@@ -23,6 +23,8 @@ export type Voice = {
   category: string | null;
   labels: Record<string, string>;
   description: string | null;
+  /** Server-side favorite flag. Pinned to the top of the voice picker. */
+  isFavorite?: boolean;
 };
 
 export type MusicTrack = {
@@ -71,6 +73,10 @@ export type Scene = {
   imageVariants: SceneImage[];
   voiceSignedUrl: string | null;
   videoSignedUrl: string | null;
+  /** Optional R2 key for a per-scene product reference image. */
+  productReferenceKey?: string | null;
+  /** Renderable URL for the product reference image. */
+  productReferenceSignedUrl?: string | null;
 };
 
 /**
@@ -116,6 +122,12 @@ export type VoiceSettings = {
 };
 
 export type ImageModelSettings = {
+  /**
+   * Still-image backend: Higgsfield Soul (fast, default) vs Fal-only
+   * (Nano Banana 2 / Flux). Stored per project; overrides server
+   * IMAGE_PROVIDER when set.
+   */
+  imageProvider?: 'higgsfield' | 'fal';
   /** Which provider runs first in the cascade */
   preferredCascade?: 'nano-banana-2' | 'flux-dev';
   /** Fal text-to-image endpoint (Nano Banana 2) */
@@ -171,6 +183,21 @@ export type SubtitleSettings = {
   maxLines?: number;
 };
 
+export type SceneProgress = {
+  /** Total number of scenes for the project. */
+  total: number;
+  /** Scenes that have at least one image variant rendered. */
+  withImages: number;
+  /** Scenes where the user has picked a final image. */
+  picked: number;
+  /** Scenes whose latest job failed. */
+  failed: number;
+  /** Scenes that have a per-scene Seedance video. */
+  withVideo: number;
+  /** Scenes whose status indicates they are queued or in-flight. */
+  queued: number;
+};
+
 export type Project = {
   id: string;
   topic: string | null;
@@ -196,6 +223,18 @@ export type Project = {
   updatedAt: string;
   scenes: Scene[];
   hookVariants: HookVariant[];
+};
+
+/**
+ * Shape returned by `GET /api/projects` — same as Project minus the
+ * heavy hydrated arrays, plus a `sceneProgress` summary used by the home
+ * page's per-project status badges.
+ */
+export type ProjectListItem = Omit<
+  Project,
+  'scenes' | 'hookVariants' | 'subtitlesSignedUrl' | 'outputSignedUrl' | 'subtitleCustomFontSignedUrl'
+> & {
+  sceneProgress: SceneProgress;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -227,11 +266,23 @@ export const api = {
   listStyles: () => request<{ styles: Style[] }>('/api/styles'),
   // Voices
   listVoices: () => request<{ voices: Voice[] }>('/api/voices'),
+  /** Star a voice so it pins to the top of the picker. Backend-global. */
+  favoriteVoice: (voiceId: string) =>
+    request<{ voiceId: string; isFavorite: true }>(
+      `/api/voices/${encodeURIComponent(voiceId)}/favorite`,
+      { method: 'POST', body: JSON.stringify({}) }
+    ),
+  unfavoriteVoice: (voiceId: string) =>
+    request<{ voiceId: string; isFavorite: false }>(
+      `/api/voices/${encodeURIComponent(voiceId)}/favorite`,
+      { method: 'DELETE' }
+    ),
   // Music
   listMusic: () => request<{ tracks: MusicTrack[] }>('/api/music'),
 
   // Projects
-  listProjects: () => request<{ projects: Project[] }>('/api/projects'),
+  listProjects: () =>
+    request<{ projects: ProjectListItem[] }>('/api/projects'),
   getProject: (id: string) => request<{ project: Project }>(`/api/projects/${id}`),
   createProject: (body: {
     topic?: string;
@@ -309,6 +360,52 @@ export const api = {
     return res.json() as Promise<{ sceneImage: SceneImage }>;
   },
 
+  /**
+   * Upload (or replace) the product reference image for a scene. The file
+   * is stored on R2 and used as `image_url` input for image generation so
+   * the product appears consistently across regenerations of that scene.
+   */
+  uploadProductReference: async (
+    projectId: string,
+    sceneId: string,
+    file: File
+  ) => {
+    const form = new FormData();
+    form.append('image', file);
+    const res = await fetch(
+      `${API_BASE}/api/projects/${projectId}/scenes/${sceneId}/product-reference`,
+      { method: 'POST', body: form }
+    );
+    if (!res.ok) {
+      let message = `${res.status} ${res.statusText}`;
+      try {
+        const body = await res.json();
+        if (body?.error) message = body.error;
+      } catch (_) {
+        /* ignore */
+      }
+      throw new Error(message);
+    }
+    return res.json() as Promise<{ scene: Scene }>;
+  },
+
+  /** Remove the product reference image for a single scene. */
+  deleteProductReference: (projectId: string, sceneId: string) =>
+    request<{ scene: Scene }>(
+      `/api/projects/${projectId}/scenes/${sceneId}/product-reference`,
+      { method: 'DELETE' }
+    ),
+
+  /**
+   * Copy the source scene's product reference image onto every other scene
+   * in the project. Backend handles the R2 copy so we don't re-upload.
+   */
+  applyProductReferenceToAll: (projectId: string, sourceSceneId: string) =>
+    request<{ updated: number }>(
+      `/api/projects/${projectId}/scenes/${sourceSceneId}/product-reference/apply-to-all`,
+      { method: 'POST', body: JSON.stringify({}) }
+    ),
+
   generateSceneVoice: (projectId: string, sceneId: string, body?: { voiceId?: string; voiceSettings?: VoiceSettings }) =>
     request<{ enqueued: true; jobId: string }>(
       `/api/projects/${projectId}/scenes/${sceneId}/voice`,
@@ -329,6 +426,22 @@ export const api = {
       body: JSON.stringify({ scenes }),
     }),
 
+  /**
+   * Patch one scene's editable fields (voiceoverText, imagePrompt,
+   * durationSeconds) without disturbing its image variants, voice, or
+   * video. Used by the global Scenes drawer after image generation has
+   * started so users can tweak narration / prompt for one scene at a time.
+   */
+  patchScene: (
+    projectId: string,
+    sceneId: string,
+    body: Partial<Pick<Scene, 'voiceoverText' | 'imagePrompt' | 'durationSeconds'>>
+  ) =>
+    request<{ scene: Scene }>(
+      `/api/projects/${projectId}/scenes/${sceneId}`,
+      { method: 'PATCH', body: JSON.stringify(body) }
+    ),
+
   /** Re-run Claude script generation. */
   regenerateScript: (
     projectId: string,
@@ -339,12 +452,27 @@ export const api = {
       { method: 'POST', body: JSON.stringify(body) }
     ),
 
-  /** Approve script -> kick off per-scene image generation. */
-  approveScript: (projectId: string, body: { variantCount?: number } = {}) =>
-    request<{ enqueued: true; sceneCount: number }>(
-      `/api/projects/${projectId}/approve-script`,
-      { method: 'POST', body: JSON.stringify(body) }
-    ),
+  /**
+   * Approve script -> kick off per-scene image generation.
+   *
+   * Idempotent: only scenes whose imagePrompt changed (or have no variants
+   * yet) are enqueued unless `force: true` is passed. Response reports how
+   * many scenes were actually queued vs skipped so the UI can tell the user
+   * "nothing changed" instead of pretending it's regenerating.
+   */
+  approveScript: (
+    projectId: string,
+    body: { variantCount?: number; force?: boolean } = {}
+  ) =>
+    request<{
+      enqueued: boolean;
+      enqueuedCount: number;
+      skippedCount: number;
+      sceneCount: number;
+    }>(`/api/projects/${projectId}/approve-script`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   regenerateSubtitles: (projectId: string, subtitleSettings?: SubtitleSettings) =>
     request<{ enqueued: true; jobId: string }>(

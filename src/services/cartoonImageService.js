@@ -22,6 +22,7 @@ const axios = require('axios');
 const apiConfig = require('../config/api.config');
 const { mergeImageModelSettings } = require('../config/mediaModelDefaults');
 const r2Service = require('./r2Service');
+const higgsfield = require('./higgsfieldImageService');
 
 // Flux Dev / schnell / Flux Pro all use this enum.
 const FLUX_ASPECT_RATIO_MAP = {
@@ -99,6 +100,8 @@ function classifyImageError(message) {
   if (
     m.includes('quota') ||
     m.includes('insufficient') ||
+    m.includes('not_enough_credits') ||
+    m.includes('out of credits') ||
     m.includes('payment required') ||
     m.includes('402')
   ) return 'quota';
@@ -174,6 +177,35 @@ async function callFluxSchnell({ prompt, aspectRatio, seed, apiKey }) {
   return { url: image.url, width: image.width, height: image.height, seed: data?.seed, model: 'flux-schnell' };
 }
 
+/**
+ * Higgsfield Soul image generation. Faster than the Fal cascade in our
+ * benchmarks (single-digit seconds vs. 15-30s for Nano Banana 2). Used as
+ * the primary provider when IMAGE_PROVIDER=higgsfield (the default in
+ * .env.example) and HIGGSFIELD_API_KEY+SECRET are set.
+ *
+ * Supports image-to-image via `imageUrl` so the per-scene product
+ * reference (when set) keeps the product identity consistent across
+ * regenerations. The Soul docs only show `image_url` as a single-value
+ * parameter; we feed the product reference into it directly.
+ */
+async function callHiggsfield({ prompt, aspectRatio, seed, productReferenceUrl, soul = {} }) {
+  const result = await higgsfield.generateOne({
+    prompt,
+    aspectRatio,
+    resolution: soul.resolution === '1080p' ? '1080p' : '720p',
+    seed,
+    imageUrl: productReferenceUrl || null,
+  });
+  return {
+    url: result.url,
+    width: null,
+    height: null,
+    seed,
+    model: 'higgsfield-soul',
+    elapsedMs: result.elapsedMs,
+  };
+}
+
 async function callNanoBanana({ prompt, aspectRatio, seed, apiKey, nano = {} }) {
   const outFmt = ['jpeg', 'png', 'webp'].includes(nano.output_format) ? nano.output_format : 'png';
   const resStr = NANO_BANANA_RESOLUTIONS.has(nano.resolution) ? nano.resolution : '1K';
@@ -206,35 +238,119 @@ async function callNanoBanana({ prompt, aspectRatio, seed, apiKey, nano = {} }) 
 }
 
 /**
+ * Determine which provider should run first. Honours the IMAGE_PROVIDER
+ * env knob (`higgsfield` | `fal`) and falls back to the existing Fal-only
+ * behaviour when Higgsfield isn't configured. Returns the cascade as an
+ * ordered array of `{ name, fn }` so the loop can log per-provider
+ * benchmarks consistently.
+ */
+function buildCascade({ preferredModel, imageProvider }) {
+  const envPref = (process.env.IMAGE_PROVIDER || 'higgsfield').toLowerCase();
+  const explicit =
+    imageProvider && ['higgsfield', 'fal'].includes(String(imageProvider).toLowerCase())
+      ? String(imageProvider).toLowerCase()
+      : null;
+  const effective = explicit || envPref;
+  const wantHiggsfield =
+    effective === 'higgsfield' && higgsfield.isConfigured();
+
+  const fal =
+    preferredModel === 'flux-dev'
+      ? [
+          { name: 'flux-dev', fn: callFluxDev, kind: 'flux' },
+          { name: 'nano-banana-2', fn: callNanoBanana, kind: 'nano' },
+          { name: 'flux-schnell', fn: callFluxSchnell, kind: 'flux' },
+        ]
+      : [
+          { name: 'nano-banana-2', fn: callNanoBanana, kind: 'nano' },
+          { name: 'flux-dev', fn: callFluxDev, kind: 'flux' },
+          { name: 'flux-schnell', fn: callFluxSchnell, kind: 'flux' },
+        ];
+
+  if (wantHiggsfield) {
+    return [{ name: 'higgsfield-soul', fn: callHiggsfield, kind: 'higgsfield' }, ...fal];
+  }
+  return fal;
+}
+
+/**
  * Run the model cascade until one succeeds. Throws with aggregated error
  * details if every provider fails, so upstream logs show the real reason
  * rather than the generic "Flux variant N failed".
+ *
+ * Logs per-provider benchmark lines (`provider=…  ms=…  variant=…`) so
+ * we can compare Higgsfield vs Fal speed in production logs without
+ * spinning up a separate metrics pipeline.
  */
-async function callImageCascade(prompt, { fluxAspectRatio, nanoAspectRatio, seed, preferredModel, nanoBanana2 }) {
+async function callImageCascade(prompt, ctx) {
+  const {
+    fluxAspectRatio,
+    nanoAspectRatio,
+    higgsfieldAspectRatio,
+    seed,
+    preferredModel,
+    nanoBanana2,
+    productReferenceUrl,
+    soul,
+    variantIndex,
+  } = ctx;
+
   const apiKey = apiConfig.falAI.apiKey;
-  if (!apiKey) throw new Error('FAL_AI_API_KEY not configured');
-
-  const cascade = preferredModel === 'flux-dev'
-    ? [callFluxDev, callNanoBanana, callFluxSchnell]
-    : [callNanoBanana, callFluxDev, callFluxSchnell];
-
+  // Fal key is still required for the fallback path -- only error out at
+  // call time, after we've tried Higgsfield (which doesn't need it).
+  const cascade = buildCascade({
+    preferredModel,
+    imageProvider: ctx.imageProvider,
+  });
   const errors = [];
-  for (const fn of cascade) {
+
+  for (const step of cascade) {
+    const t0 = Date.now();
     try {
-      if (fn === callNanoBanana) {
-        return await fn({
+      if (step.kind === 'higgsfield') {
+        const result = await step.fn({
+          prompt,
+          aspectRatio: higgsfieldAspectRatio,
+          seed,
+          productReferenceUrl,
+          soul: soul || {},
+        });
+        const ms = Date.now() - t0;
+        console.log(
+          `[image-bench] provider=${step.name} variant=${variantIndex} ms=${ms} ref=${
+            productReferenceUrl ? 'yes' : 'no'
+          }`
+        );
+        return { ...result, elapsedMs: ms };
+      }
+      if (!apiKey) throw new Error('FAL_AI_API_KEY not configured');
+      let result;
+      if (step.kind === 'nano') {
+        result = await step.fn({
           prompt,
           aspectRatio: nanoAspectRatio,
           seed,
           apiKey,
           nano: nanoBanana2 || {},
         });
+      } else {
+        result = await step.fn({
+          prompt,
+          aspectRatio: fluxAspectRatio,
+          seed,
+          apiKey,
+        });
       }
-      return await fn({ prompt, aspectRatio: fluxAspectRatio, seed, apiKey });
+      const ms = Date.now() - t0;
+      console.log(
+        `[image-bench] provider=${step.name} variant=${variantIndex} ms=${ms} ref=no`
+      );
+      return { ...result, elapsedMs: ms };
     } catch (err) {
+      const ms = Date.now() - t0;
       const msg = extractAxiosError(err);
-      errors.push(`${fn.name}: ${msg}`);
-      console.warn(`   ↳ ${fn.name} failed: ${msg}`);
+      errors.push(`${step.name}: ${msg}`);
+      console.warn(`   ↳ ${step.name} failed in ${ms}ms: ${msg}`);
     }
   }
   throw new Error(`All image providers failed:\n  - ${errors.join('\n  - ')}`);
@@ -256,7 +372,12 @@ async function downloadImageBuffer(url) {
  * @param {number} [input.variantCount=3]
  * @param {string} [input.aspectRatio='16:9']
  * @param {object} [input.imageModelSettings]  merged in worker from `projects.image_model_settings`
- * @returns {Promise<Array<{variantIndex, r2Key, promptUsed, width, height, seed}>>}
+ * @param {string} [input.productReferenceUrl] Optional product reference image URL
+ *                                            (signed R2 URL) used as
+ *                                            image-to-image input by
+ *                                            Higgsfield Soul to keep the
+ *                                            product consistent across scenes.
+ * @returns {Promise<Array<{variantIndex, r2Key, promptUsed, width, height, seed, modelUsed, elapsedMs}>>}
  */
 async function generateSceneVariants(input) {
   const {
@@ -267,6 +388,7 @@ async function generateSceneVariants(input) {
     variantCount = 3,
     aspectRatio = '16:9',
     imageModelSettings = {},
+    productReferenceUrl = null,
   } = input;
 
   if (!projectId || !sceneId) throw new Error('projectId and sceneId required');
@@ -291,11 +413,15 @@ async function generateSceneVariants(input) {
   const nanoAspectRatio = NANO_BANANA_ASPECT_RATIOS.has(rawAspect) ? rawAspect : 'auto';
   const fluxAspectRatio =
     rawAspect === 'auto' || !FLUX_ASPECT_RATIO_MAP[rawAspect] ? '16:9' : rawAspect;
+  // Higgsfield doesn't accept "auto"; fall back to the original requested
+  // ratio (or 16:9 if the user picked auto).
+  const higgsfieldAspectRatio = rawAspect === 'auto' ? '16:9' : rawAspect;
 
   const nanoBanana2 = {
     ...imgCfg.nanoBanana2,
     imageModelId: imgCfg.imageModelId || 'fal-ai/nano-banana-2',
   };
+  const soul = imgCfg.higgsfieldSoul || {};
 
   const positivePrompt = buildPositivePrompt(prompt, style);
   const negativePrompt = buildNegativePrompt(style);
@@ -303,16 +429,25 @@ async function generateSceneVariants(input) {
 
   const variants = [];
   const errors = [];
+  const benchTotalStart = Date.now();
   for (let i = 0; i < variantCount; i++) {
     try {
       const img = await callImageCascade(finalPrompt, {
         fluxAspectRatio,
         nanoAspectRatio,
+        higgsfieldAspectRatio,
         seed: Math.floor(Math.random() * 1_000_000_000),
         preferredModel,
         nanoBanana2,
+        soul,
+        productReferenceUrl,
+        imageProvider: imgCfg.imageProvider,
+        variantIndex: i,
       });
       const buf = await downloadImageBuffer(img.url);
+      // Higgsfield + Flux always emit PNG/JPEG/WEBP via URL; we don't get
+      // to pick the format, so default to PNG. Nano Banana respects the
+      // `output_format` setting.
       const fmt = (nanoBanana2.output_format || 'png').toLowerCase();
       const ext = fmt === 'jpeg' ? 'jpg' : fmt === 'webp' ? 'webp' : 'png';
       const mime = ext === 'jpg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
@@ -326,8 +461,9 @@ async function generateSceneVariants(input) {
         height: img.height,
         seed: img.seed,
         modelUsed: img.model,
+        elapsedMs: img.elapsedMs,
       });
-      console.log(`   ✅ Variant ${i} generated via ${img.model}`);
+      console.log(`   ✅ Variant ${i} generated via ${img.model} in ${img.elapsedMs}ms`);
     } catch (err) {
       console.error(`   ❌ Variant ${i} failed: ${err.message}`);
       errors.push(`variant ${i}: ${err.message}`);
@@ -341,6 +477,14 @@ async function generateSceneVariants(input) {
   if (variants.length === 0) {
     throw new Error(`All image variants failed:\n${errors.join('\n')}`);
   }
+
+  const totalMs = Date.now() - benchTotalStart;
+  const usedHiggsfield = variants.filter((v) => v.modelUsed === 'higgsfield-soul').length;
+  console.log(
+    `[image-bench] scene=${sceneId} variants=${variants.length}/${variantCount}` +
+      ` totalMs=${totalMs} higgsfield=${usedHiggsfield} ref=${productReferenceUrl ? 'yes' : 'no'}`
+  );
+
   return variants;
 }
 
