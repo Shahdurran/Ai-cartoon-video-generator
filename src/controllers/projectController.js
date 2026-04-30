@@ -661,7 +661,36 @@ async function replaceScenes(req, res, next) {
       }
     }
 
+    const oldScenes = await sceneRepo.findByProject(projectId);
     const inserted = await sceneRepo.bulkReplace(projectId, normalised);
+
+    // Product references are keyed by scene id on R2. Recreating rows would
+    // orphan them unless we copy each old slot's reference onto the new row
+    // at the same index (best-effort — matches reorder/split semantics).
+    if (r2Service.isConfigured()) {
+      const n = Math.min(inserted.length, oldScenes.length);
+      for (let i = 0; i < n; i++) {
+        const srcKey = oldScenes[i]?.productReferenceKey;
+        if (!srcKey) continue;
+        const m = srcKey.match(/\.([a-z0-9]+)$/i);
+        const ext = (m ? m[1] : 'png').toLowerCase();
+        const dstKey = r2Service.keys.productReference(projectId, inserted[i].id, ext);
+        try {
+          await r2Service.copy(srcKey, dstKey);
+          await sceneRepo.setProductReferenceKey(inserted[i].id, dstKey);
+          r2Service.del(srcKey).catch(() => {});
+        } catch (err) {
+          console.error(
+            `[replaceScenes] product reference copy failed index=${i}:`,
+            err.message || err
+          );
+        }
+      }
+      for (let i = inserted.length; i < oldScenes.length; i++) {
+        const k = oldScenes[i]?.productReferenceKey;
+        if (k) r2Service.del(k).catch(() => {});
+      }
+    }
 
     // Keep scene_count in sync if the user added/deleted scenes.
     if (inserted.length !== project.sceneCount) {

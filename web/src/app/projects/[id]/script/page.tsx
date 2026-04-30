@@ -52,8 +52,8 @@ export default async function ScriptReviewPage({
         Review the <span className="text-gradient">script</span>
       </h1>
       <p className="text-sm text-ink-100/70 mb-8 animate-fade-up stagger-1">
-        Edit any scene&rsquo;s narration or visual prompt, reorder, add, or
-        remove scenes. Nothing is generated until you approve.
+        Edit each scene&rsquo;s narration or visual prompt, add an optional product reference image per scene
+        before you approve, reorder or remove scenes. Nothing is generated until you approve.
       </p>
       <ScriptReview initialProject={project} />
     </div>

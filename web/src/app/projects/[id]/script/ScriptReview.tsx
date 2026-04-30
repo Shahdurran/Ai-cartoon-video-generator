@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, type Project, type SceneDraft } from '@/lib/api';
+import { api, type Project, type Scene, type SceneDraft } from '@/lib/api';
 import { ImageModelPanel } from '../ModelSettingsPanel';
 
 type DraftScene = SceneDraft & { /** stable react key, not sent to backend */ key: string };
@@ -32,6 +32,15 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
   const [busy, setBusy] = useState<null | 'save' | 'regenerate' | 'approve'>(null);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [productRefBusy, setProductRefBusy] = useState<
+    null | { sceneId: string; op: 'upload' | 'delete' | 'applyAll' }
+  >(null);
+
+  const sceneById = useMemo(() => {
+    const m = new Map<string, Scene>();
+    for (const sc of project.scenes) m.set(sc.id, sc);
+    return m;
+  }, [project.scenes]);
 
   // While the script is still being written, poll until scenes arrive.
   useEffect(() => {
@@ -117,6 +126,8 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
           }))
       );
       setDirty(false);
+      const { project: fresh } = await api.getProject(project.id);
+      setProject(fresh);
     } catch (err: any) {
       setError(err.message || 'Failed to save scenes');
     } finally {
@@ -197,6 +208,65 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
     );
     if (!ok) return;
     approveAndGenerate({ force: true });
+  }
+
+  function mergeSceneIntoProject(updated: Scene): void {
+    setProject((p) => ({
+      ...p,
+      scenes: p.scenes.map((sc) =>
+        sc.id === updated.id
+          ? {
+              ...sc,
+              ...updated,
+              imageVariants: sc.imageVariants,
+              productReferenceSignedUrl:
+                updated.productReferenceSignedUrl ?? sc.productReferenceSignedUrl ?? null,
+              productReferenceKey:
+                updated.productReferenceKey ?? sc.productReferenceKey ?? null,
+            }
+          : sc
+      ),
+    }));
+  }
+
+  async function handleUploadProductRef(sceneId: string, file: File) {
+    setError(null);
+    setProductRefBusy({ sceneId, op: 'upload' });
+    try {
+      const { scene } = await api.uploadProductReference(project.id, sceneId, file);
+      mergeSceneIntoProject(scene as Scene);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to upload reference');
+    } finally {
+      setProductRefBusy(null);
+    }
+  }
+
+  async function handleDeleteProductRef(sceneId: string) {
+    setError(null);
+    setProductRefBusy({ sceneId, op: 'delete' });
+    try {
+      const { scene } = await api.deleteProductReference(project.id, sceneId);
+      mergeSceneIntoProject(scene as Scene);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to remove reference');
+    } finally {
+      setProductRefBusy(null);
+    }
+  }
+
+  async function handleApplyProductRefToAll(sceneId: string) {
+    setError(null);
+    setProductRefBusy({ sceneId, op: 'applyAll' });
+    try {
+      await api.applyProductReferenceToAll(project.id, sceneId);
+      const { project: fresh } = await api.getProject(project.id);
+      setProject(fresh);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to apply reference to all scenes');
+    } finally {
+      setProductRefBusy(null);
+    }
   }
 
   // Loading state while Claude is still writing.
@@ -410,6 +480,17 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
                 </div>
               )}
             </div>
+
+            <ScriptStepProductReference
+              sceneId={s.key}
+              persistedOnServer={sceneById.has(s.key)}
+              productReferenceSignedUrl={sceneById.get(s.key)?.productReferenceSignedUrl ?? null}
+              locked={locked}
+              busy={productRefBusy}
+              onUpload={(file) => handleUploadProductRef(s.key, file)}
+              onRemove={() => handleDeleteProductRef(s.key)}
+              onApplyToAll={() => handleApplyProductRefToAll(s.key)}
+            />
           </li>
         ))}
       </ol>
@@ -438,6 +519,10 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
         <div className="glass-panel text-[12px] text-ink-100/80 leading-relaxed animate-fade-up">
           <h3 className="font-medium text-white mb-2">What happens next?</h3>
           <ol className="list-decimal pl-4 space-y-1.5 text-ink-200/85">
+            <li>
+              Optionally add a <span className="text-white">product reference</span> image
+              per scene so your product can appear in the first generated artwork.
+            </li>
             <li>You approve the script.</li>
             <li>
               We queue <span className="text-white">3 image variants</span> per scene
@@ -483,5 +568,132 @@ function IconBtn({
     >
       {children}
     </button>
+  );
+}
+
+function ScriptStepProductReference({
+  sceneId,
+  persistedOnServer,
+  productReferenceSignedUrl,
+  locked,
+  busy,
+  onUpload,
+  onRemove,
+  onApplyToAll,
+}: {
+  sceneId: string;
+  persistedOnServer: boolean;
+  productReferenceSignedUrl: string | null | undefined;
+  locked: boolean;
+  busy: null | { sceneId: string; op: 'upload' | 'delete' | 'applyAll' };
+  onUpload: (file: File) => void;
+  onRemove: () => void;
+  onApplyToAll: () => void;
+}) {
+  const rowBusy =
+    busy?.sceneId === sceneId ? busy.op : null;
+  const disabled = locked || busy !== null;
+
+  return (
+    <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3">
+      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-[11px] font-medium text-white">Product reference (optional)</div>
+          <div className="text-[10px] text-ink-100/60 leading-snug mt-0.5">
+            Upload a packshot or product photo for this scene. It is passed into image generation so the
+            product can appear before the first render.{' '}
+            {!persistedOnServer && (
+              <span className="text-amber-200/90">Save edits first — new scenes need a server id.</span>
+            )}
+          </div>
+        </div>
+        {productReferenceSignedUrl && persistedOnServer && (
+          <div className="flex flex-shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onApplyToAll}
+              disabled={disabled}
+              className="rounded-lg border border-white/10 px-2 py-1 text-[10px] text-ink-100/80 transition hover:border-white/25 hover:text-white disabled:opacity-30"
+              title="Copy this reference to every other scene"
+            >
+              {rowBusy === 'applyAll' ? 'Applying…' : 'Apply to all'}
+            </button>
+            <button
+              type="button"
+              onClick={onRemove}
+              disabled={disabled}
+              className="rounded-lg border border-white/10 px-2 py-1 text-[10px] text-rose-200/80 transition hover:border-rose-400/40 hover:text-rose-200 disabled:opacity-30"
+            >
+              {rowBusy === 'delete' ? 'Removing…' : 'Remove'}
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg border border-white/10 bg-black/40">
+          {productReferenceSignedUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={productReferenceSignedUrl}
+              alt="Product reference"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center px-1 text-center text-[9px] text-ink-100/40">
+              None
+            </div>
+          )}
+        </div>
+        <FilePickerButton
+          label={
+            rowBusy === 'upload'
+              ? 'Uploading…'
+              : productReferenceSignedUrl
+                ? 'Replace reference'
+                : 'Upload reference'
+          }
+          disabled={disabled || !persistedOnServer}
+          accept="image/png,image/jpeg,image/webp"
+          onPick={onUpload}
+        />
+      </div>
+    </div>
+  );
+}
+
+function FilePickerButton({
+  label,
+  onPick,
+  disabled,
+  accept,
+}: {
+  label: string;
+  onPick: (file: File) => void;
+  disabled?: boolean;
+  accept?: string;
+}) {
+  const ref = useRef<HTMLInputElement | null>(null);
+  return (
+    <>
+      <input
+        ref={ref}
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onPick(f);
+          if (ref.current) ref.current.value = '';
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => ref.current?.click()}
+        disabled={disabled}
+        className="rounded-lg border border-white/10 px-3 py-1.5 text-[11px] text-ink-100/80 transition hover:border-white/25 hover:text-white disabled:opacity-30"
+      >
+        {label}
+      </button>
+    </>
   );
 }
