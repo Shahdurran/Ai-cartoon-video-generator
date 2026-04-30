@@ -113,18 +113,35 @@ module.exports = async function sceneImagesProcessor(job) {
     return { sceneId, variantCount: variants.length };
   } catch (err) {
     const errorCode = cartoonImage.classifyImageError(err.message);
-    await sceneRepo.updateStatus(sceneId, 'failed', err.message, errorCode);
-    await pubsub.publish(projectId, {
-      sceneId,
-      phase: 'image',
-      status: 'failed',
-      error: err.message,
-      errorCode,
-    });
+    // Bull increments attemptsMade only after the processor throws (inside
+    // moveToFailed). While waiting for backoff retries, the scene must stay
+    // non-failed or the UI shows "Image generation failed" even though the
+    // job will run again.
+    const maxAttempts = Math.max(1, Number(job.opts.attempts) || 1);
+    const isFinalAttempt = job.attemptsMade + 1 >= maxAttempts;
 
-    // Even on failure, check whether the rest of the project's scenes are
-    // done -- otherwise a single failed scene leaves the project stuck in
-    // 'images-pending' forever.
+    if (isFinalAttempt) {
+      await sceneRepo.updateStatus(sceneId, 'failed', err.message, errorCode);
+      await pubsub.publish(projectId, {
+        sceneId,
+        phase: 'image',
+        status: 'failed',
+        error: err.message,
+        errorCode,
+      });
+    } else {
+      await pubsub.publish(projectId, {
+        sceneId,
+        phase: 'image',
+        status: 'retrying',
+        attempt: job.attemptsMade + 1,
+        maxAttempts,
+        error: err.message,
+      });
+    }
+
+    // Only treat the scene as "done" for project-level gates once it has
+    // variants or is finally marked failed (after all retries).
     await maybeMarkImagesReady(projectId);
 
     throw err;
