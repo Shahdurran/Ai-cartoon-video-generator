@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api, type Project, type Scene } from '@/lib/api';
 import { isSceneContentEditable } from '@/lib/projectEditPolicy';
 import { subscribeProjectStatus } from '@/lib/projectStatusStream';
@@ -34,7 +35,15 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
   const [edits, setEdits] = useState<Record<string, SceneEdits>>({});
   const [busy, setBusy] = useState<Record<string, string | null>>({});
   const [toast, setToast] = useState<string | null>(null);
+  const [portalReady, setPortalReady] = useState(false);
   const lastSseRefetchAt = useRef(0);
+
+  // Render into document.body so fixed z-index stacks above the app shell
+  // header (sticky z-30 + backdrop-blur). Inside <main> the drawer was
+  // trapped in a lower layer and painted behind the header.
+  useLayoutEffect(() => {
+    setPortalReady(true);
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -233,14 +242,14 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
   const sceneEditingLocked =
     !project || !isSceneContentEditable(project.status);
 
-  return (
+  const drawerUi = (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — z above root header (sticky z-30) */}
       <div
         aria-hidden
         onClick={onClose}
         className={[
-          'fixed inset-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity',
+          'fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm transition-opacity',
           open ? 'opacity-100' : 'pointer-events-none opacity-0',
         ].join(' ')}
       />
@@ -248,7 +257,7 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
         role="dialog"
         aria-label="Scenes"
         className={[
-          'fixed right-0 top-0 z-50 h-full w-full max-w-[640px] transform border-l border-white/10 bg-ink-900/95 backdrop-blur-xl transition-transform duration-300',
+          'fixed right-0 top-0 z-[101] h-full w-full max-w-[640px] transform border-l border-white/10 bg-ink-900/95 backdrop-blur-xl transition-transform duration-300',
           open ? 'translate-x-0' : 'translate-x-full',
         ].join(' ')}
       >
@@ -318,6 +327,11 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
       </aside>
     </>
   );
+
+  if (!portalReady || typeof document === 'undefined') {
+    return null;
+  }
+  return createPortal(drawerUi, document.body);
 }
 
 function SceneRow({
