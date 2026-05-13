@@ -228,10 +228,7 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
               ...sc,
               ...updated,
               imageVariants: sc.imageVariants,
-              productReferenceSignedUrl:
-                updated.productReferenceSignedUrl ?? sc.productReferenceSignedUrl ?? null,
-              productReferenceKey:
-                updated.productReferenceKey ?? sc.productReferenceKey ?? null,
+              shots: sc.shots ?? [],
             }
           : sc
       ),

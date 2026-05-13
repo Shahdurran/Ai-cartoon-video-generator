@@ -453,15 +453,42 @@ function SceneShotsCard({
     shots.length > 0 &&
     shots.some((sh) => (sh.imageVariants ?? []).length > 0);
 
+  // The variant the user approved on the Images step. We surface it on
+  // multi-shot scenes so they remember which look they signed off on
+  // before splitting the scene into shots.
+  const sceneVariants = scene.imageVariants ?? [];
+  const approvedSceneImage =
+    sceneVariants.find((v) => v.id === scene.selectedImageId) ||
+    sceneVariants[0] ||
+    null;
+
   return (
     <div className="glass rounded-2xl p-5 space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[11px] uppercase tracking-wider text-ink-100/60">
-            Scene {scene.sceneIndex + 1} · {Math.round(scene.durationSeconds)}s
-          </div>
-          <div className="mt-1 text-sm text-ink-100/85 line-clamp-2">
-            {scene.imagePrompt}
+        <div className="flex min-w-0 items-start gap-3">
+          {scene.multiShotEnabled && approvedSceneImage?.signedUrl && (
+            <div
+              className="relative h-16 w-24 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-black/40"
+              title="Approved scene image from the Images step"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={approvedSceneImage.signedUrl}
+                alt={`Approved scene ${scene.sceneIndex + 1} variant`}
+                className="h-full w-full object-cover"
+              />
+              <span className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 py-0.5 text-center text-[9px] uppercase tracking-wider text-white/80">
+                Approved
+              </span>
+            </div>
+          )}
+          <div className="min-w-0">
+            <div className="text-[11px] uppercase tracking-wider text-ink-100/60">
+              Scene {scene.sceneIndex + 1} · {Math.round(scene.durationSeconds)}s
+            </div>
+            <div className="mt-1 text-sm text-ink-100/85 line-clamp-2">
+              {scene.imagePrompt}
+            </div>
           </div>
         </div>
         <label className="flex items-center gap-2 text-xs text-ink-100/80">

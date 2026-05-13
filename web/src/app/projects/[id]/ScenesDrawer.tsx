@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { api, type Project, type Scene } from '@/lib/api';
 import { isSceneContentEditable } from '@/lib/projectEditPolicy';
 import { subscribeProjectStatus } from '@/lib/projectStatusStream';
+import { notifyProjectWorkspaceMutated } from '@/lib/projectWorkspaceEvents';
 import { isSceneImageGenerationFailed } from '@/lib/sceneStatus';
 
 type Props = {
@@ -43,6 +44,25 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
   // trapped in a lower layer and painted behind the header.
   useLayoutEffect(() => {
     setPortalReady(true);
+  }, []);
+
+  const mergeSceneIntoProject = useCallback((updated: Scene) => {
+    setProject((p) => {
+      if (!p) return p;
+      return {
+        ...p,
+        scenes: p.scenes.map((sc) =>
+          sc.id === updated.id
+            ? {
+                ...sc,
+                ...updated,
+                imageVariants: sc.imageVariants,
+                shots: sc.shots ?? [],
+              }
+            : sc
+        ),
+      };
+    });
   }, []);
 
   const refresh = useCallback(async () => {
@@ -192,8 +212,14 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
   async function uploadProductRef(scene: Scene, file: File) {
     setSceneBusy(scene.id, 'productRef');
     try {
-      await api.uploadProductReference(projectId, scene.id, file);
+      const { scene: updated } = await api.uploadProductReference(
+        projectId,
+        scene.id,
+        file
+      );
+      mergeSceneIntoProject(updated);
       await refresh();
+      notifyProjectWorkspaceMutated(projectId);
       flashToast(`Product reference set on scene ${scene.sceneIndex + 1}`);
     } catch (err: any) {
       flashToast(err?.message || 'Product reference upload failed');
@@ -205,8 +231,13 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
   async function clearProductRef(scene: Scene) {
     setSceneBusy(scene.id, 'productRefClear');
     try {
-      await api.deleteProductReference(projectId, scene.id);
+      const { scene: updated } = await api.deleteProductReference(
+        projectId,
+        scene.id
+      );
+      mergeSceneIntoProject(updated);
       await refresh();
+      notifyProjectWorkspaceMutated(projectId);
       flashToast(`Product reference cleared on scene ${scene.sceneIndex + 1}`);
     } catch (err: any) {
       flashToast(err?.message || 'Clear failed');
@@ -223,6 +254,7 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
     try {
       const { updated } = await api.applyProductReferenceToAll(projectId, scene.id);
       await refresh();
+      notifyProjectWorkspaceMutated(projectId);
       flashToast(`Applied to ${updated} other scene${updated === 1 ? '' : 's'}`);
     } catch (err: any) {
       flashToast(err?.message || 'Apply failed');

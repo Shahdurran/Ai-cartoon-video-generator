@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, type Project, type Voice, type MusicTrack } from '@/lib/api';
 import { subscribeProjectStatus } from '@/lib/projectStatusStream';
+import { PROJECT_WORKSPACE_MUTATED } from '@/lib/projectWorkspaceEvents';
 import { isSceneImageGenerationFailed } from '@/lib/sceneStatus';
 import { ScenePicker } from './ScenePicker';
 import { VoiceoverPanel } from './VoiceoverPanel';
@@ -42,6 +43,18 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
       /* ignore */
     }
   }, []);
+
+  // Re-sync when the global Scenes drawer updates product refs (etc.); that
+  // UI keeps its own fetch and does not emit image-phase SSE events.
+  useEffect(() => {
+    function onWorkspaceMutated(e: Event) {
+      const id = (e as CustomEvent<{ projectId?: string }>).detail?.projectId;
+      if (id && id === projectIdRef.current) void refresh();
+    }
+    window.addEventListener(PROJECT_WORKSPACE_MUTATED, onWorkspaceMutated);
+    return () =>
+      window.removeEventListener(PROJECT_WORKSPACE_MUTATED, onWorkspaceMutated);
+  }, [refresh]);
 
   // Live updates via the shared project status stream. A single
   // EventSource is reused across components (and survives React strict
