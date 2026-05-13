@@ -372,6 +372,12 @@ Return ONLY the script text - no titles, no labels, no meta-commentary.`;
       language = 'English',
       tone = 'dramatic',
       mode = 'topic',
+      // Target window length for cinematic multi-shot suggestions. When > 0
+      // (default), each scene comes back with a `suggestedShots` array of
+      // ceil(durationSeconds / multiShotTargetSeconds) shot prompts. The
+      // user opts in per-scene via the shots-review UI; we always suggest
+      // so the user can preview without re-calling Claude.
+      multiShotTargetSeconds = 2.5,
     } = options;
 
     if (!input || typeof input !== 'string') {
@@ -392,21 +398,41 @@ Return ONLY the script text - no titles, no labels, no meta-commentary.`;
       ? Math.max(2, Math.round(totalDurationSeconds / sceneCount))
       : 5;
 
+    const wantShots = Number(multiShotTargetSeconds) > 0;
+    const targetShotSecs = Math.max(1.5, Math.min(5, Number(multiShotTargetSeconds) || 2.5));
+
     const systemPrompt = `You are an expert short-form video scriptwriter AND visual director for AI-generated cartoons. You produce scene-by-scene breakdowns that pair a detailed cartoon image prompt with a short voiceover line.
 
 HARD RULES:
 1. Output VALID JSON ONLY. No prose, no markdown, no code fences.
 2. Exactly ${sceneCount} scenes, in order, sceneIndex starting at 0.
-3. Each scene must have: sceneIndex (int), imagePrompt (string), voiceoverText (string), durationSeconds (number).
+3. Each scene must have: sceneIndex (int), imagePrompt (string), voiceoverText (string), durationSeconds (number)${wantShots ? ', suggestedShots (array of 2-4 sub-shot prompts)' : ''}.
 4. voiceoverText must be in ${language}. Around ${Math.round(perSceneSeconds * 2.4)} words per scene (so it fits ~${perSceneSeconds}s at normal speaking pace).
 5. imagePrompt should be in English regardless of voiceover language -- Flux responds best to English. Describe the scene concretely: subject, action, setting, mood, camera framing. 20-60 words. Do NOT include any style descriptors ("cartoon", "3D", "anime") -- those are applied downstream via a style preset.
 6. durationSeconds should be a reasonable integer in the 3-8 range that matches voiceover length. Sum roughly equals ${totalDurationSeconds || sceneCount * perSceneSeconds}.
 7. Tone: ${tone}. The opening scene should hook the viewer immediately.
+8. Character continuity is mandatory across all scenes. If there is a recurring main character (known or unknown), keep the same identity details in every imagePrompt: face shape, hair color/style, age range, build, skin tone, and signature outfit markers. Scene 0 should establish these details clearly, and later scenes must reuse them unless the story explicitly calls for a transformation.${wantShots ? `
+
+MULTI-SHOT SUGGESTIONS (suggestedShots field):
+9. For each scene, propose how it could be split into 2-4 cinematic shots of ~${targetShotSecs}s each, so the final cut cross-cuts between them on hard cuts and avoids the "slideshow" feel.
+10. Shot count = round(durationSeconds / ${targetShotSecs}), clamped to 2-4. Scenes with durationSeconds < 4 get exactly 2 shots.
+11. Each suggested shot is { "role": "wide"|"closeup"|"detail"|"reaction", "imagePrompt": "..." }. The first shot is usually "wide" to establish, then alternate angles. imagePrompt is in English, 20-60 words, must SHOW THE SAME CHARACTER as the scene's main imagePrompt (same face, hair, outfit) but from a different camera angle, distance, or moment within the scene's beat.
+12. Shots are visual variations of the SAME scene moment, not a sub-story. The voiceover plays continuously across all shots in the scene -- shots are visual cuts, not narrative beats.
+` : ''}
 
 OUTPUT SHAPE (exact keys, no extras):
 {
   "scenes": [
-    { "sceneIndex": 0, "imagePrompt": "...", "voiceoverText": "...", "durationSeconds": 5 }
+    {
+      "sceneIndex": 0,
+      "imagePrompt": "...",
+      "voiceoverText": "...",
+      "durationSeconds": 5${wantShots ? `,
+      "suggestedShots": [
+        { "role": "wide",     "imagePrompt": "..." },
+        { "role": "closeup",  "imagePrompt": "..." }
+      ]` : ''}
+    }
   ]
 }`;
 
@@ -444,12 +470,47 @@ OUTPUT SHAPE (exact keys, no extras):
           throw new Error(`Expected ${sceneCount} scenes, got ${parsed.scenes.length}`);
         }
 
-        const scenes = parsed.scenes.map((s, i) => ({
-          sceneIndex: Number.isInteger(s.sceneIndex) ? s.sceneIndex : i,
-          imagePrompt: String(s.imagePrompt || '').trim(),
-          voiceoverText: String(s.voiceoverText || '').trim(),
-          durationSeconds: Number(s.durationSeconds) || perSceneSeconds,
-        }));
+        const scenes = parsed.scenes.map((s, i) => {
+          const dur = Number(s.durationSeconds) || perSceneSeconds;
+          const sceneIndex = Number.isInteger(s.sceneIndex) ? s.sceneIndex : i;
+          const imagePrompt = String(s.imagePrompt || '').trim();
+          const voiceoverText = String(s.voiceoverText || '').trim();
+
+          let suggestedShots = null;
+          if (wantShots) {
+            const raw = Array.isArray(s.suggestedShots) ? s.suggestedShots : [];
+            const cleaned = raw
+              .map((sh) => ({
+                role: ['wide', 'closeup', 'detail', 'reaction', 'custom'].includes(
+                  String(sh.role || '').toLowerCase()
+                )
+                  ? String(sh.role).toLowerCase()
+                  : 'wide',
+                imagePrompt: String(sh.imagePrompt || '').trim(),
+              }))
+              .filter((sh) => sh.imagePrompt.length > 0);
+
+            if (cleaned.length >= 2) {
+              suggestedShots = cleaned.slice(0, 4);
+            } else {
+              // Synthesise a 2-shot fallback so the user can still opt this
+              // scene into multi-shot without re-running Claude. We just
+              // duplicate the scene's main image prompt with role hints.
+              suggestedShots = [
+                { role: 'wide', imagePrompt: `${imagePrompt}. Wide establishing shot.` },
+                { role: 'closeup', imagePrompt: `${imagePrompt}. Tight close-up on the main subject's face / hands.` },
+              ];
+            }
+          }
+
+          return {
+            sceneIndex,
+            imagePrompt,
+            voiceoverText,
+            durationSeconds: dur,
+            suggestedShots,
+          };
+        });
 
         for (const s of scenes) {
           if (!s.imagePrompt || !s.voiceoverText) {

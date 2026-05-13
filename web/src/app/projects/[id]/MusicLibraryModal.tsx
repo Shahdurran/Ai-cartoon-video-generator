@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api, type MusicTrack } from '@/lib/api';
 import { AudioPreviewButton } from '@/components/AudioPreviewButton';
 
@@ -9,14 +9,19 @@ export function MusicLibraryModal({
   tracks,
   onClose,
   onSelected,
+  onLibraryChanged,
 }: {
   projectId: string;
   tracks: MusicTrack[];
   onClose: () => void;
   onSelected: () => void;
+  onLibraryChanged?: () => Promise<void> | void;
 }) {
   const [query, setQuery] = useState('');
   const [saving, setSaving] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const filtered = tracks.filter((t) =>
     t.name.toLowerCase().includes(query.toLowerCase())
@@ -39,6 +44,21 @@ export function MusicLibraryModal({
       onSelected();
     } finally {
       setSaving(null);
+    }
+  }
+
+  async function uploadTrack(file: File | null) {
+    if (!file) return;
+    setUploadError(null);
+    setUploading(true);
+    try {
+      await api.uploadMusicTrack(file);
+      if (onLibraryChanged) await onLibraryChanged();
+    } catch (err: any) {
+      setUploadError(err?.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
@@ -69,12 +89,32 @@ export function MusicLibraryModal({
         </div>
 
         <div className="p-4 border-b border-white/10">
+          <div className="flex items-center gap-2">
+            <input
+              placeholder="Search tracks…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="field"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="btn-ghost !px-3 !py-2 !text-xs whitespace-nowrap"
+              type="button"
+            >
+              {uploading ? 'Uploading…' : 'Upload music'}
+            </button>
+          </div>
           <input
-            placeholder="Search tracks…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="field"
+            ref={fileInputRef}
+            type="file"
+            accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac"
+            className="hidden"
+            onChange={(e) => uploadTrack(e.target.files?.[0] || null)}
           />
+          {uploadError && (
+            <div className="mt-2 text-[11px] text-rose-300">{uploadError}</div>
+          )}
         </div>
 
         <div className="overflow-y-auto p-4 space-y-2 flex-1">

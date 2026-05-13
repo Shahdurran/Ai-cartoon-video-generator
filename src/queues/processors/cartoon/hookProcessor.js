@@ -27,6 +27,7 @@ const cartoonAssembly = require('../../../services/cartoonAssemblyService');
 const srt = require('../../../services/srtService');
 const falVideo = require('../../../services/falVideoService');
 const assembler = require('../../../services/cartoonAssemblerService');
+const { toFfmpegIoPath } = assembler;
 
 const r2Service = require('../../../services/r2Service');
 const projectRepo = require('../../../db/repositories/projectRepo');
@@ -121,8 +122,8 @@ async function runVariant({ variantId, variantIndex, hookScript, projectId, scen
     const colorGrade = style?.ffmpegColorGrade;
     const videoFilter = colorGrade ? `${colorGrade},${subFilter}` : subFilter;
 
-    ffmpeg(rawHookPath)
-      .input(localVoice)
+    ffmpeg(toFfmpegIoPath(rawHookPath))
+      .input(toFfmpegIoPath(localVoice))
       .complexFilter([
         `[0:v]${videoFilter}[v]`,
         `[1:a]apad[a]`,
@@ -135,8 +136,9 @@ async function runVariant({ variantId, variantIndex, hookScript, projectId, scen
         '-preset', 'fast',
         '-crf', '20',
         '-c:a', 'aac',
+        '-y',
       ])
-      .output(hookWithSubsPath)
+      .output(toFfmpegIoPath(hookWithSubsPath))
       .on('end', resolve)
       .on('error', reject)
       .run();
@@ -163,7 +165,16 @@ async function runVariant({ variantId, variantIndex, hookScript, projectId, scen
 }
 
 module.exports = async function hookProcessor(job) {
-  const { projectId, hookDurationSeconds = 10, variantCount = 3 } = job.data;
+  const {
+    projectId,
+    hookDurationSeconds = 10,
+    variantCount = 3,
+    placeholderIds = [],
+    // When set, the job only re-runs the specified hook_variant rows
+    // using their existing scripts (no Claude call). Used by the
+    // per-variant "Retry" button on the UI.
+    retryIds = null,
+  } = job.data;
   if (!projectId) throw new Error('projectId required');
 
   const project = await projectRepo.findById(projectId);
@@ -174,24 +185,67 @@ module.exports = async function hookProcessor(job) {
   if (scenes.length === 0) throw new Error('Project has no scenes');
   const scene0 = scenes[0];
 
-  // 1. Claude produces all hook scripts in one call.
-  const { hooks } = await claude.generateHookVariants({
-    originalOpening: scene0.voiceoverText,
-    topic: project.topic,
-    variantCount,
-    hookDurationSeconds,
-  });
+  let rows;
+  let effectiveDuration = hookDurationSeconds;
 
-  // 2. Pre-create DB rows and grab their ids.
-  const rows = [];
-  for (let i = 0; i < hooks.length; i++) {
-    const row = await hookVariantRepo.create({
-      projectId,
-      variantIndex: i,
-      hookScript: hooks[i].script,
+  if (Array.isArray(retryIds) && retryIds.length > 0) {
+    // Retry mode: load existing rows, reset to pending, reuse scripts.
+    rows = [];
+    for (const id of retryIds) {
+      const existing = await hookVariantRepo.findById(id);
+      if (!existing || existing.projectId !== projectId) continue;
+      const reset = await hookVariantRepo.update(id, {
+        status: 'pending',
+        errorMessage: null,
+      });
+      rows.push(reset || existing);
+    }
+    if (rows.length === 0) {
+      return { variantCount: 0, results: [] };
+    }
+    effectiveDuration = rows[0].hookDurationSeconds || hookDurationSeconds;
+  } else {
+    // 1. Claude produces all hook scripts in one call.
+    const { hooks } = await claude.generateHookVariants({
+      originalOpening: scene0.voiceoverText,
+      topic: project.topic,
+      variantCount,
       hookDurationSeconds,
     });
-    rows.push(row);
+
+    // 2. Reuse pre-created placeholder rows when the controller created
+    // them (so the UI keeps the same row ids it's already polling on),
+    // otherwise create fresh rows. The placeholder rows have an empty
+    // script, so always overwrite with Claude's output.
+    rows = [];
+    for (let i = 0; i < hooks.length; i++) {
+      const placeholderId = placeholderIds[i];
+      if (placeholderId) {
+        const row = await hookVariantRepo.update(placeholderId, {
+          hookScript: hooks[i].script,
+          status: 'pending',
+          errorMessage: null,
+        });
+        if (row) rows.push(row);
+        else {
+          const fallback = await hookVariantRepo.create({
+            projectId,
+            variantIndex: i,
+            hookScript: hooks[i].script,
+            hookDurationSeconds,
+          });
+          rows.push(fallback);
+        }
+      } else {
+        const row = await hookVariantRepo.create({
+          projectId,
+          variantIndex: i,
+          hookScript: hooks[i].script,
+          hookDurationSeconds,
+        });
+        rows.push(row);
+      }
+    }
   }
 
   // 3. Download original final video once; all variants reuse it.
@@ -221,25 +275,25 @@ module.exports = async function hookProcessor(job) {
       rows.map((row, i) =>
         runVariant({
           variantId: row.id,
-          variantIndex: i,
-          hookScript: hooks[i].script,
+          variantIndex: row.variantIndex,
+          hookScript: row.hookScript,
           projectId,
           scene0,
           style,
           project,
-          hookDurationSeconds,
+          hookDurationSeconds: effectiveDuration,
           tmpDir: path.join(tmpDir, `v${i}`),
           originalVideoPath,
         }).catch(async (err) => {
           await hookVariantRepo.update(row.id, { status: 'failed', errorMessage: err.message });
-          await pubsub.publish(projectId, { phase: 'hook', status: 'failed', variantIndex: i, error: err.message });
+          await pubsub.publish(projectId, { phase: 'hook', status: 'failed', variantIndex: row.variantIndex, error: err.message });
           throw err;
         })
       )
     );
 
     const summary = results.map((r, i) => ({
-      variantIndex: i,
+      variantIndex: rows[i].variantIndex,
       status: r.status,
       ...(r.status === 'fulfilled' ? r.value : { error: r.reason?.message }),
     }));

@@ -16,6 +16,18 @@ const projectRepo = require('../../../db/repositories/projectRepo');
 const styleRepo = require('../../../db/repositories/styleRepo');
 const r2Service = require('../../../services/r2Service');
 const pubsub = require('../../../services/pubsubService');
+const higgsfield = require('../../../services/higgsfieldImageService');
+const { mergeImageModelSettings } = require('../../../config/mediaModelDefaults');
+
+function higgsfieldIsPrimaryProvider(imageModelSettings) {
+  const imgCfg = mergeImageModelSettings(imageModelSettings || {});
+  const explicit =
+    imgCfg.imageProvider && ['higgsfield', 'fal'].includes(String(imgCfg.imageProvider).toLowerCase())
+      ? String(imgCfg.imageProvider).toLowerCase()
+      : null;
+  const effective = explicit || (process.env.IMAGE_PROVIDER || 'higgsfield').toLowerCase();
+  return effective === 'higgsfield' && higgsfield.isConfigured();
+}
 
 /**
  * Mint a URL the image provider can reach. Prefer the R2 public CDN URL
@@ -57,6 +69,33 @@ async function maybeMarkImagesReady(projectId) {
   }
 }
 
+function buildCharacterConsistencyContext(scenes, currentScene) {
+  if (!Array.isArray(scenes) || !currentScene) return null;
+
+  const sorted = [...scenes].sort((a, b) => (a.sceneIndex || 0) - (b.sceneIndex || 0));
+  const earlier = sorted.filter(
+    (s) =>
+      s.id !== currentScene.id &&
+      typeof s.imagePrompt === 'string' &&
+      s.imagePrompt.trim() &&
+      Number(s.sceneIndex) < Number(currentScene.sceneIndex)
+  );
+  const fallback = sorted.filter(
+    (s) => s.id !== currentScene.id && typeof s.imagePrompt === 'string' && s.imagePrompt.trim()
+  );
+
+  const source = (earlier.length > 0 ? earlier : fallback).slice(-2);
+  if (source.length === 0) return null;
+
+  const anchorPrompt = source
+    .map((s) => `Scene ${Number(s.sceneIndex) + 1}: ${String(s.imagePrompt || '').trim()}`)
+    .join(' | ');
+  return {
+    anchorPrompt,
+    anchorSceneIndices: source.map((s) => Number(s.sceneIndex) + 1),
+  };
+}
+
 module.exports = async function sceneImagesProcessor(job) {
   const {
     projectId,
@@ -75,6 +114,8 @@ module.exports = async function sceneImagesProcessor(job) {
 
   const style = project.styleId ? await styleRepo.findById(project.styleId) : null;
   const prompt = customPrompt || scene.imagePrompt;
+  const projectScenes = await sceneRepo.findByProject(projectId);
+  const characterConsistency = buildCharacterConsistencyContext(projectScenes, scene);
 
   await pubsub.publish(projectId, {
     sceneId, phase: 'image', status: 'running',
@@ -88,6 +129,25 @@ module.exports = async function sceneImagesProcessor(job) {
 
     const productReferenceUrl = await resolvePublicishUrl(scene.productReferenceKey);
 
+    let productCustomReferenceId = scene.productCustomReferenceId || null;
+    if (
+      productReferenceUrl &&
+      higgsfieldIsPrimaryProvider(project.imageModelSettings) &&
+      !productCustomReferenceId
+    ) {
+      try {
+        productCustomReferenceId = await higgsfield.createCustomReferenceFromImageUrl({
+          imageUrl: productReferenceUrl,
+          name: `product-${projectId}-${sceneId}`.slice(0, 200),
+        });
+        await sceneRepo.setProductCustomReferenceId(sceneId, productCustomReferenceId);
+      } catch (err) {
+        console.warn(
+          `[sceneImages] Soul ID registration failed (e.g. Higgsfield credits); Fal fallback still receives the product via Nano Banana Edit when applicable: ${err.message}`
+        );
+      }
+    }
+
     const variants = await cartoonImage.generateSceneVariants({
       projectId,
       sceneId,
@@ -96,6 +156,8 @@ module.exports = async function sceneImagesProcessor(job) {
       variantCount,
       imageModelSettings: project.imageModelSettings || {},
       productReferenceUrl,
+      productCustomReferenceId,
+      characterConsistency,
     });
 
     await sceneImageRepo.bulkCreate(sceneId, variants);

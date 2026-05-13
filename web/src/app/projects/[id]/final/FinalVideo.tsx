@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, type Project } from '@/lib/api';
 
 export function FinalVideo({ initialProject }: { initialProject: Project }) {
@@ -9,6 +9,8 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
   const [variantCount, setVariantCount] = useState(3);
   const [hookBusy, setHookBusy] = useState(false);
   const [hookError, setHookError] = useState<string | null>(null);
+  const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
+  const [clearingFailed, setClearingFailed] = useState(false);
 
   async function refresh() {
     try {
@@ -40,29 +42,116 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.status, project.subtitlesKey]);
 
+  const pendingHookCount = useMemo(
+    () => project.hookVariants.filter((h) => h.status === 'pending').length,
+    [project.hookVariants]
+  );
+
   useEffect(() => {
-    const incomplete = project.hookVariants.filter((h) => h.status === 'pending');
-    if (incomplete.length === 0) return;
+    if (pendingHookCount === 0) return;
     const t = setInterval(refresh, 4000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.hookVariants.map((h) => `${h.id}:${h.status}`).join(',')]);
+  }, [project.id, pendingHookCount]);
 
   async function generateHooks() {
     setHookBusy(true);
     setHookError(null);
+    // Immediately replace any prior variants with synthetic pending
+    // placeholders so the skeleton cards appear the moment the user
+    // clicks -- the backend wipes its rows in the same request, so what
+    // the user sees here will line up with what /api/projects returns
+    // on the next poll.
+    const optimistic = Array.from({ length: variantCount }, (_, i) => ({
+      id: `pending-${Date.now()}-${i}`,
+      projectId: project.id,
+      variantIndex: i,
+      hookScript: '',
+      hookDurationSeconds: hookDuration,
+      outputKey: null,
+      status: 'pending',
+      errorMessage: null,
+      outputSignedUrl: null,
+    }));
+    setProject((p) => ({ ...p, hookVariants: optimistic as typeof p.hookVariants }));
     try {
-      await api.generateHooks(project.id, {
+      const resp = await api.generateHooks(project.id, {
         hookDurationSeconds: hookDuration,
         variantCount,
       });
+      // If the server returned the canonical placeholder rows, swap to
+      // those so subsequent polls update them in place by id.
+      if (Array.isArray((resp as any)?.hookVariants) && (resp as any).hookVariants.length > 0) {
+        setProject((p) => ({
+          ...p,
+          hookVariants: (resp as any).hookVariants.map((h: any) => ({
+            ...h,
+            outputSignedUrl: null,
+          })),
+        }));
+      }
       await refresh();
     } catch (err: any) {
       setHookError(err.message);
+      // Restore by refreshing -- the backend may have wiped the table
+      // but failed to enqueue, in which case we want to show empty
+      // rather than fake skeletons that never resolve.
+      await refresh();
     } finally {
       setHookBusy(false);
     }
   }
+
+  async function retryHook(hookId: string) {
+    setHookError(null);
+    setRetryingIds((s) => new Set(s).add(hookId));
+    // Optimistically flip this card back to pending so the skeleton
+    // takes over the failed message immediately.
+    setProject((p) => ({
+      ...p,
+      hookVariants: p.hookVariants.map((h) =>
+        h.id === hookId ? { ...h, status: 'pending', errorMessage: null } : h
+      ),
+    }));
+    try {
+      await api.retryHookVariant(project.id, hookId);
+      await refresh();
+    } catch (err: any) {
+      setHookError(err.message);
+      await refresh();
+    } finally {
+      setRetryingIds((s) => {
+        const next = new Set(s);
+        next.delete(hookId);
+        return next;
+      });
+    }
+  }
+
+  async function clearFailed() {
+    setHookError(null);
+    setClearingFailed(true);
+    // Optimistically remove the failed cards so they vanish on click
+    // even before the server responds.
+    setProject((p) => ({
+      ...p,
+      hookVariants: p.hookVariants.filter((h) => h.status !== 'failed'),
+    }));
+    try {
+      await api.clearFailedHooks(project.id);
+      await refresh();
+    } catch (err: any) {
+      setHookError(err.message);
+      await refresh();
+    } finally {
+      setClearingFailed(false);
+    }
+  }
+
+  const failedHookCount = useMemo(
+    () => project.hookVariants.filter((h) => h.status === 'failed').length,
+    [project.hookVariants]
+  );
 
   if (!project.outputSignedUrl) {
     return (
@@ -118,7 +207,7 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
       </section>
 
       <section className="animate-fade-up stagger-1">
-        <div className="flex items-end justify-between mb-4">
+        <div className="flex items-end justify-between mb-4 gap-4">
           <div>
             <h2 className="text-2xl font-semibold text-white">
               Hook <span className="text-gradient">variants</span>
@@ -127,6 +216,17 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
               Rewrite the opening into N different hooks spliced onto the front of the video.
             </p>
           </div>
+          {failedHookCount > 0 && (
+            <button
+              type="button"
+              onClick={clearFailed}
+              disabled={clearingFailed}
+              aria-busy={clearingFailed}
+              className="btn-ghost !text-xs !py-1.5 disabled:opacity-70 disabled:cursor-wait"
+            >
+              {clearingFailed ? 'Clearing…' : `Clear ${failedHookCount} failed`}
+            </button>
+          )}
         </div>
 
         <div className="glass-panel mb-6">
@@ -174,48 +274,70 @@ export function FinalVideo({ initialProject }: { initialProject: Project }) {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {project.hookVariants.map((h, i) => (
-              <div
-                key={h.id}
-                className="glass rounded-2xl overflow-hidden flex flex-col animate-fade-up"
-                style={{ animationDelay: `${Math.min(i, 6) * 40}ms` }}
-              >
-                {h.outputSignedUrl ? (
-                  <video
-                    src={h.outputSignedUrl}
-                    controls
-                    className="w-full aspect-video bg-black"
-                  />
-                ) : (
-                  <div className="w-full aspect-video shimmer flex items-center justify-center text-sm text-ink-100/70">
-                    {h.status === 'failed' ? (
-                      <span className="text-rose-300">
-                        Failed: {h.errorMessage}
-                      </span>
-                    ) : (
-                      'Generating…'
-                    )}
-                  </div>
-                )}
-                <div className="p-4 flex-1 flex flex-col">
-                  <div className="text-[11px] uppercase tracking-wider text-brand-100/80 font-medium">
-                    Variant {h.variantIndex + 1}
-                  </div>
-                  <p className="text-sm text-ink-50 mt-2 flex-1 leading-relaxed">
-                    {h.hookScript}
-                  </p>
-                  {h.outputSignedUrl && (
-                    <a
-                      href={h.outputSignedUrl}
-                      download={`${project.id}-hook-${h.variantIndex + 1}.mp4`}
-                      className="btn-ghost mt-3 !px-3 !py-1.5 !text-xs self-start"
-                    >
-                      Download
-                    </a>
+            {project.hookVariants.map((h, i) => {
+              const isRetrying = retryingIds.has(h.id);
+              const isFailed = h.status === 'failed' && !isRetrying;
+              return (
+                <div
+                  key={h.id}
+                  className="glass rounded-2xl overflow-hidden flex flex-col animate-fade-up"
+                  style={{ animationDelay: `${Math.min(i, 6) * 40}ms` }}
+                >
+                  {h.outputSignedUrl ? (
+                    <video
+                      src={h.outputSignedUrl}
+                      controls
+                      className="w-full aspect-video bg-black"
+                    />
+                  ) : (
+                    <div className="w-full aspect-video shimmer flex items-center justify-center text-sm text-ink-100/70 px-3 text-center">
+                      {isFailed ? (
+                        <span className="text-rose-300">
+                          Failed: {h.errorMessage}
+                        </span>
+                      ) : (
+                        <span>{isRetrying ? 'Retrying…' : 'Generating…'}</span>
+                      )}
+                    </div>
                   )}
+                  <div className="p-4 flex-1 flex flex-col">
+                    <div className="text-[11px] uppercase tracking-wider text-brand-100/80 font-medium">
+                      Variant {h.variantIndex + 1}
+                    </div>
+                    <p className="text-sm text-ink-50 mt-2 flex-1 leading-relaxed">
+                      {h.hookScript || (isFailed ? '' : 'Writing hook…')}
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      {h.outputSignedUrl && (
+                        <a
+                          href={h.outputSignedUrl}
+                          download={`${project.id}-hook-${h.variantIndex + 1}.mp4`}
+                          className="btn-ghost !px-3 !py-1.5 !text-xs"
+                        >
+                          Download
+                        </a>
+                      )}
+                      {(isFailed || isRetrying) && (
+                        <button
+                          type="button"
+                          onClick={() => retryHook(h.id)}
+                          disabled={isRetrying || h.id.startsWith('pending-')}
+                          aria-busy={isRetrying}
+                          className="btn-ghost !px-3 !py-1.5 !text-xs disabled:opacity-70 disabled:cursor-wait"
+                          title={
+                            h.id.startsWith('pending-')
+                              ? 'Retry available once the variant has been queued'
+                              : 'Re-run this variant only'
+                          }
+                        >
+                          {isRetrying ? 'Retrying…' : 'Retry'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

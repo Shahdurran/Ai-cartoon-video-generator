@@ -8,6 +8,7 @@
 
 const assembler = require('../../../services/cartoonAssemblerService');
 const sceneRepo = require('../../../db/repositories/sceneRepo');
+const shotRepo = require('../../../db/repositories/shotRepo');
 const projectRepo = require('../../../db/repositories/projectRepo');
 const styleRepo = require('../../../db/repositories/styleRepo');
 const musicTrackRepo = require('../../../db/repositories/musicTrackRepo');
@@ -26,10 +27,43 @@ module.exports = async function finalAssemblyProcessor(job) {
     if (!project) throw new Error('Project not found');
 
     const scenes = await sceneRepo.findByProject(projectId);
-    const missing = scenes.filter((s) => !s.videoKey);
-    if (missing.length > 0) {
-      throw new Error(`${missing.length} scene(s) still missing videoKey`);
+
+    // Build a per-scene plan. Multi-shot scenes contribute their shot
+    // video keys; single-shot scenes contribute their scenes.video_key.
+    // Either way every scene must end up with at least one usable video
+    // input or assembly bails early.
+    const scenePlans = [];
+    for (const scene of scenes) {
+      if (scene.multiShotEnabled) {
+        const shots = await shotRepo.findByScene(scene.id);
+        const usable = shots.filter((sh) => !!sh.videoKey);
+        if (usable.length === 0) {
+          throw new Error(`Multi-shot scene ${scene.sceneIndex + 1} has no rendered shots`);
+        }
+        scenePlans.push({
+          shots: usable.map((sh) => ({
+            videoKey: sh.videoKey,
+            durationSeconds: Number(sh.durationSeconds) || 2.5,
+          })),
+        });
+      } else {
+        if (!scene.videoKey) {
+          throw new Error(`Scene ${scene.sceneIndex + 1} is missing videoKey`);
+        }
+        scenePlans.push(null);
+      }
     }
+
+    // Build the legacy parallel array of scene-level video keys. For
+    // multi-shot scenes we hand the assembler the FIRST shot's key as a
+    // placeholder -- the assembler ignores it when scenePlans[i] is set,
+    // it just needs the array length to match for downstream voice and
+    // subtitle indexing.
+    const sceneVideoKeys = scenes.map((s, i) => {
+      if (s.videoKey) return s.videoKey;
+      const plan = scenePlans[i];
+      return plan?.shots?.[0]?.videoKey || null;
+    });
 
     // Always rebuild the combined SRT before final concat whenever any
     // scene has voice. That way a failed first attempt (bad key, rate
@@ -68,7 +102,8 @@ module.exports = async function finalAssemblyProcessor(job) {
 
     const { tmpDir } = await assembler.assembleFinalVideo({
       projectId,
-      sceneVideoKeys: scenes.map((s) => s.videoKey),
+      sceneVideoKeys,
+      scenePlans,
       sceneVoiceKeys: scenes.map((s) => s.voiceKey || null),
       subtitlesKey: project.subtitlesKey || null,
       musicKey: music?.r2Key || null,

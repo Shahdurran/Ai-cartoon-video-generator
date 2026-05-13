@@ -307,39 +307,39 @@ if ($prerequisites.NodeJS) {
 }
 
 # =============================================================================
-# STEP 4: Install Node.js Dependencies (Frontend)
+# STEP 4: Install Node.js Dependencies (Next.js web app)
 # =============================================================================
 
-Write-Step "Step 4/9: Installing Frontend Dependencies"
+Write-Step "Step 4/9: Installing Web (Next.js) Dependencies"
 
-if ($prerequisites.NodeJS -and (Test-Path "frontend")) {
-    Write-Info "  Running npm install in frontend..."
+if ($prerequisites.NodeJS -and (Test-Path "web")) {
+    Write-Info "  Running npm install in web..."
     
     try {
-        Push-Location frontend
+        Push-Location web
         npm install
         Pop-Location
         
         if ($LASTEXITCODE -eq 0) {
-            Write-Success "✅ Frontend dependencies installed"
-            Add-Log "Frontend dependencies installed successfully"
+            Write-Success "✅ Web app dependencies installed"
+            Add-Log "Web dependencies installed successfully"
         } else {
             Write-Warning "⚠️  Some packages may have failed to install"
-            Add-Log "Frontend npm install had warnings" "WARNING"
+            Add-Log "Web npm install had warnings" "WARNING"
         }
     } catch {
         Pop-Location
-        Write-Error "❌ Failed to install frontend dependencies"
-        Add-Log "Frontend npm install failed" "ERROR"
-        $script:errors += "Frontend npm install failed: $_"
+        Write-Error "❌ Failed to install web dependencies"
+        Add-Log "Web npm install failed" "ERROR"
+        $script:errors += "Web npm install failed: $_"
     }
 } else {
-    if (-not (Test-Path "frontend")) {
-        Write-Warning "⚠️  Frontend directory not found"
-        Add-Log "Frontend directory not found" "WARNING"
+    if (-not (Test-Path "web")) {
+        Write-Warning "⚠️  Web directory not found"
+        Add-Log "Web directory not found" "WARNING"
     } else {
         Write-Warning "⚠️  Skipping (Node.js not available)"
-        Add-Log "Skipped frontend install - Node.js not available" "WARNING"
+        Add-Log "Skipped web install - Node.js not available" "WARNING"
     }
 }
 
@@ -470,7 +470,7 @@ if (-not (Test-Path ".env")) {
     
     $envContent = @"
 # Server Configuration
-PORT=3000
+PORT=4000
 NODE_ENV=production
 
 # Redis Configuration (Docker container)
@@ -548,8 +548,8 @@ $verificationResults.Directories = (Test-Path "output") -and (Test-Path "temp") 
 # Check backend node_modules
 $verificationResults.BackendDeps = Test-Path "node_modules"
 
-# Check frontend node_modules
-$verificationResults.FrontendDeps = Test-Path "frontend/node_modules"
+# Check web node_modules
+$verificationResults.FrontendDeps = Test-Path "web/node_modules"
 
 # Check Redis
 try {
@@ -623,7 +623,7 @@ Write-Host "     .\start-both.bat" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  4. Access the application:" -ForegroundColor White
 Write-Host "     Frontend: http://localhost:5173" -ForegroundColor Cyan
-Write-Host "     Backend:  http://localhost:3000" -ForegroundColor Cyan
+Write-Host "     Backend:  http://localhost:4000" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  5. Run tests (optional):" -ForegroundColor White
 Write-Host "     npm run test:pipeline" -ForegroundColor Gray

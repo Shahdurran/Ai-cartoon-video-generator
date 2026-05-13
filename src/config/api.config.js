@@ -110,7 +110,6 @@ if (!assemblyAiKey) {
 
 const requiredKeys = {
   FAL_AI_API_KEY: 'Fal.AI',
-  GENAIPRO_API_KEY: 'Genaipro.vn',
 };
 
 Object.entries(requiredKeys).forEach(([envKey, serviceName]) => {

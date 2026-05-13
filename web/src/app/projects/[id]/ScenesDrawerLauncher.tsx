@@ -39,7 +39,7 @@ export function ScenesDrawerLauncher({ projectId }: { projectId: string }) {
           setHasOpened(true);
         }}
         className="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 rounded-full border border-white/15 bg-ink-800/85 px-4 py-2.5 text-xs font-medium text-white shadow-2xl backdrop-blur-md transition hover:border-white/30 hover:bg-ink-700/90"
-        title="Open scenes panel (press S)"
+        title="Scenes — same as Script step: narration, prompts, product ref (S)"
         aria-label="Open scenes panel"
       >
         <span

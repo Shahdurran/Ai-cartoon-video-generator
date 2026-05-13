@@ -2,6 +2,10 @@
 
 import { useRef, useState } from 'react';
 import { api, type Scene, type SceneErrorCode } from '@/lib/api';
+import {
+  isSceneImageGenerationFailed,
+  isSceneVideoStageFailed,
+} from '@/lib/sceneStatus';
 
 /** Human-readable explanation + suggested action for each classified
  *  failure code. Surfaced in place of raw provider error strings so the
@@ -65,6 +69,7 @@ export function ScenePicker({
   }
 
   async function regenerate() {
+    if (busy) return;
     setBusy(true);
     try {
       await api.regenerateSceneImage(projectId, scene.id, {
@@ -78,6 +83,7 @@ export function ScenePicker({
   }
 
   async function retryFailed() {
+    if (busy) return;
     setBusy(true);
     try {
       await api.regenerateSceneImage(projectId, scene.id, {
@@ -92,6 +98,7 @@ export function ScenePicker({
   async function uploadFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (busy) return;
     setBusy(true);
     try {
       await api.uploadSceneImage(projectId, scene.id, file);
@@ -102,20 +109,21 @@ export function ScenePicker({
     }
   }
 
-  const isFailed = scene.status === 'failed';
+  const imageGenFailed = isSceneImageGenerationFailed(scene);
+  const videoStageFailed = isSceneVideoStageFailed(scene);
   const isGenerating =
-    !isFailed && scene.imageVariants.length === 0;
+    !imageGenFailed && scene.imageVariants.length === 0;
   const isUnpicked =
-    !isFailed && scene.imageVariants.length > 0 && !scene.selectedImageId;
+    !imageGenFailed && scene.imageVariants.length > 0 && !scene.selectedImageId;
 
-  const failure = isFailed
+  const failure = imageGenFailed
     ? ERROR_COPY[scene.errorCode || 'unknown']
     : null;
 
   return (
     <div
       className={`glass-panel ${
-        isFailed ? 'border border-rose-400/25' : ''
+        imageGenFailed ? 'border border-rose-400/25' : ''
       }`}
     >
       <div className="flex items-start justify-between mb-4 gap-4">
@@ -127,7 +135,8 @@ export function ScenePicker({
             {scene.voiceoverText}
           </div>
           <div className="text-[11px] text-ink-200/70 mt-1.5">
-            {scene.durationSeconds}s · {scene.status}
+            {scene.durationSeconds}s ·{' '}
+            {videoStageFailed ? 'failed after images' : scene.status}
           </div>
         </div>
         {isUnpicked && (
@@ -138,7 +147,16 @@ export function ScenePicker({
         )}
       </div>
 
-      {isFailed ? (
+      {videoStageFailed && (
+        <div className="mb-3 rounded-xl border border-amber-400/25 bg-amber-500/[0.08] px-3 py-2 text-[11px] text-amber-100/95 leading-relaxed">
+          {`A later pipeline step (voice or video) failed for this scene, but your `}
+          <span className="font-medium text-white">image variants below are still valid</span>.
+          Use <span className="font-medium text-white">Scene videos</span> or <span className="font-medium text-white">Voice</span>{' '}
+          steps to retry — you do not need to regenerate images unless you want new looks.
+        </div>
+      )}
+
+      {imageGenFailed ? (
         <div className="rounded-xl border border-rose-400/25 bg-rose-500/[0.06] p-4 space-y-3">
           <div>
             <div className="text-sm font-medium text-rose-100">
@@ -163,9 +181,10 @@ export function ScenePicker({
             <button
               onClick={retryFailed}
               disabled={busy}
-              className="btn-primary !px-3 !py-1.5 !text-xs"
+              aria-busy={busy}
+              className="btn-primary !px-3 !py-1.5 !text-xs disabled:opacity-70 disabled:cursor-wait"
             >
-              {busy ? 'Retrying…' : 'Retry generation'}
+              {busy ? 'Processing…' : 'Retry generation'}
             </button>
             <label className="btn-ghost !px-3 !py-1.5 !text-xs cursor-pointer">
               Upload custom image
@@ -256,7 +275,7 @@ export function ScenePicker({
         </div>
       )}
 
-      {!isFailed && (
+      {!imageGenFailed && (
         <div className="mt-4 flex items-center gap-3 flex-wrap">
           <button
             onClick={() => setShowPromptTweak((v) => !v)}
@@ -279,14 +298,22 @@ export function ScenePicker({
           {busy && (
             <span className="text-[11px] text-ink-200/70 flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-brand-400 animate-glow" />
-              Working…
+              Processing…
             </span>
           )}
         </div>
       )}
 
-      {!isFailed && showPromptTweak && (
+      {!imageGenFailed && showPromptTweak && (
         <div className="mt-3 space-y-2 animate-fade-up">
+          {(scene.productReferenceKey || scene.productReferenceSignedUrl) && (
+            <p className="text-[11px] text-ink-100/75 leading-snug rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+              This scene has a <span className="text-white/90">product reference</span>. With Higgsfield, the API registers a{' '}
+              <span className="text-white/90">Soul ID</span> from that image for stronger conditioning than{' '}
+              <code className="text-[10px] text-white/75">image_url</code> alone — empty hands can still happen; spell out grip, label, and camera angle, retry variants, try{' '}
+              <span className="text-white/90">fal.ai only</span> in image settings, or <span className="text-white/90">Upload custom image</span> for a guaranteed frame.
+            </p>
+          )}
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -296,9 +323,10 @@ export function ScenePicker({
           <button
             onClick={regenerate}
             disabled={busy}
-            className="btn-primary !px-3 !py-1.5 !text-xs"
+            aria-busy={busy}
+            className="btn-primary !px-3 !py-1.5 !text-xs disabled:opacity-70 disabled:cursor-wait"
           >
-            {busy ? 'Queued…' : 'Generate new variants'}
+            {busy ? 'Processing…' : 'Generate new variants'}
           </button>
         </div>
       )}

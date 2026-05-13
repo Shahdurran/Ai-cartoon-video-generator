@@ -17,13 +17,35 @@ export function VoiceoverPanel({
   currentSettings: VoiceSettings;
   onSaved: () => Promise<void> | void;
 }) {
+  /** Fresh list from GET /api/voices (re-fetched on mount so we pick up full ElevenLabs pagination). */
+  const [voiceList, setVoiceList] = useState<Voice[]>(voices);
   const [voiceId, setVoiceId] = useState(currentVoiceId || '');
   const [query, setQuery] = useState('');
+  const [showScope, setShowScope] = useState<'all' | 'favorites'>('all');
   const [stability, setStability] = useState(currentSettings.stability ?? 0.5);
   const [similarity, setSimilarity] = useState(currentSettings.similarityBoost ?? 0.75);
   const [speed, setSpeed] = useState(currentSettings.speed ?? 1.0);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setVoiceList(voices);
+  }, [voices]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { voices: fresh } = await api.listVoices();
+        if (!cancelled) setVoiceList(fresh);
+      } catch {
+        /* keep SSR / prop list */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Optimistic favorites: start from server-provided flags, allow instant
   // toggle without waiting for the round-trip. The set is the source of
@@ -45,12 +67,12 @@ export function VoiceoverPanel({
   useEffect(() => {
     setFavorites((prev) => {
       const next = new Set<string>();
-      voices.forEach((v) => {
+      voiceList.forEach((v) => {
         if (v.isFavorite || prev.has(v.voiceId)) next.add(v.voiceId);
       });
       return next;
     });
-  }, [voices]);
+  }, [voiceList]);
 
   async function toggleFavorite(voiceIdToToggle: string) {
     const wasFav = favorites.has(voiceIdToToggle);
@@ -75,15 +97,20 @@ export function VoiceoverPanel({
   }
 
   const filtered = useMemo(() => {
+    let base =
+      showScope === 'favorites'
+        ? voiceList.filter((v) => favorites.has(v.voiceId))
+        : voiceList.slice();
+
     const q = query.trim().toLowerCase();
     const matches = q
-      ? voices.filter(
+      ? base.filter(
           (v) =>
             v.name.toLowerCase().includes(q) ||
             v.category?.toLowerCase().includes(q) ||
             Object.values(v.labels || {}).some((l) => l?.toLowerCase().includes(q))
         )
-      : voices.slice();
+      : base;
 
     // Pin favorites to the top, preserving the original order within each
     // group so the user's mental map of the list stays stable.
@@ -93,7 +120,7 @@ export function VoiceoverPanel({
       return bFav - aFav;
     });
     return matches;
-  }, [voices, query, favorites]);
+  }, [voiceList, query, favorites, showScope]);
 
   const favoriteCount = favorites.size;
 
@@ -119,14 +146,39 @@ export function VoiceoverPanel({
 
   return (
     <div className="glass-panel animate-fade-up">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <h3 className="font-medium text-white">Voiceover</h3>
         <span className="text-[11px] text-ink-200/70">
-          {voices.length} voice{voices.length === 1 ? '' : 's'}
+          {voiceList.length} voice{voiceList.length === 1 ? '' : 's'}
           {favoriteCount > 0 && (
             <span className="ml-2 text-amber-200/80">★ {favoriteCount}</span>
           )}
         </span>
+      </div>
+
+      <div className="flex rounded-xl border border-white/10 p-0.5 mb-3 bg-black/20">
+        <button
+          type="button"
+          onClick={() => setShowScope('all')}
+          className={
+            showScope === 'all'
+              ? 'flex-1 rounded-lg bg-white/10 px-3 py-1.5 text-[11px] font-medium text-white'
+              : 'flex-1 rounded-lg px-3 py-1.5 text-[11px] text-ink-200/80 hover:text-white/90'
+          }
+        >
+          All voices
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowScope('favorites')}
+          className={
+            showScope === 'favorites'
+              ? 'flex-1 rounded-lg bg-white/10 px-3 py-1.5 text-[11px] font-medium text-white'
+              : 'flex-1 rounded-lg px-3 py-1.5 text-[11px] text-ink-200/80 hover:text-white/90'
+          }
+        >
+          Favorites only
+        </button>
       </div>
 
       <input
@@ -136,7 +188,7 @@ export function VoiceoverPanel({
         className="field mb-3"
       />
 
-      {voices.length === 0 ? (
+      {voiceList.length === 0 ? (
         <div className="rounded-xl border border-dashed border-white/10 p-6 text-center text-xs text-ink-200/70">
           No voices available. Check ELEVENLABS_API_KEY.
         </div>
@@ -159,7 +211,13 @@ export function VoiceoverPanel({
           ))}
           {filtered.length === 0 && (
             <div className="text-xs text-ink-200/70 text-center py-6">
-              No voices match &ldquo;{query}&rdquo;.
+              {showScope === 'favorites' && favoriteCount === 0
+                ? 'No favorites yet — use the star on a voice to add it here.'
+                : showScope === 'favorites'
+                  ? 'No favorites match your search.'
+                  : query.trim()
+                    ? `No voices match "${query}".`
+                    : 'No voices to show.'}
             </div>
           )}
         </div>

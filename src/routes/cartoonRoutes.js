@@ -27,8 +27,9 @@
  *   POST   /api/projects/:id/subtitles
  *   POST   /api/projects/:id/generate
  *   POST   /api/projects/:id/hooks
- *
- *   GET    /api/projects/:id/status/stream                     (SSE)
+ *   POST   /api/projects/:id/hooks/retry                 body: { hookId }
+ *   POST   /api/projects/:id/hooks/:hookId/retry         (alias)
+ *   DELETE /api/projects/:id/hooks/failed
  */
 
 const express = require('express');
@@ -49,6 +50,7 @@ router.delete('/voices/:voiceId/favorite', cartoonVoiceController.removeFavorite
 
 router.get('/music', cartoonMusicController.list);
 router.get('/music/:id', cartoonMusicController.get);
+router.post('/music/upload', cartoonMusicController.upload.single('file'), cartoonMusicController.uploadTrack);
 
 router.post('/projects', projectController.create);
 router.get('/projects', projectController.list);
@@ -107,10 +109,39 @@ router.post(
   projectController.regenerateSceneVideo
 );
 
+// Multi-shot scenes (cinematic cuts every ~2.5s).
+router.patch(
+  '/projects/:id/scenes/:sceneId/multi-shot',
+  projectController.setMultiShot
+);
+router.put(
+  '/projects/:id/scenes/:sceneId/shots',
+  projectController.replaceShots
+);
+router.post('/projects/:id/approve-shots', projectController.approveShots);
+router.patch(
+  '/projects/:id/scenes/:sceneId/shots/:shotId/select-image',
+  projectController.selectShotImage
+);
+router.post(
+  '/projects/:id/scenes/:sceneId/shots/:shotId/regenerate-image',
+  projectController.regenerateShotImage
+);
+router.post(
+  '/projects/:id/scenes/:sceneId/shots/:shotId/regenerate-video',
+  projectController.regenerateShotVideo
+);
+router.post('/projects/:id/approve-shot-images', projectController.approveShotImages);
+
 router.post('/projects/:id/subtitles', projectController.regenerateSubtitles);
 router.post('/projects/:id/generate', projectController.generate);
 router.post('/projects/:id/approve-videos', projectController.approveVideos);
+// Hook retry: register `/hooks/retry` before `/hooks` so `retry` is never
+// captured as a hook id segment on odd proxies; body carries hookId.
+router.post('/projects/:id/hooks/retry', projectController.retryHookVariant);
 router.post('/projects/:id/hooks', projectController.generateHooks);
+router.post('/projects/:id/hooks/:hookId/retry', projectController.retryHookVariant);
+router.delete('/projects/:id/hooks/failed', projectController.clearFailedHookVariants);
 
 router.get('/projects/:id/status/stream', projectController.statusStream);
 

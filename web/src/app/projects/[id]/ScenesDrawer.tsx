@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type Project, type Scene } from '@/lib/api';
+import { isSceneContentEditable } from '@/lib/projectEditPolicy';
+import { subscribeProjectStatus } from '@/lib/projectStatusStream';
+import { isSceneImageGenerationFailed } from '@/lib/sceneStatus';
 
 type Props = {
   projectId: string;
@@ -31,7 +34,7 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
   const [edits, setEdits] = useState<Record<string, SceneEdits>>({});
   const [busy, setBusy] = useState<Record<string, string | null>>({});
   const [toast, setToast] = useState<string | null>(null);
-  const sseRef = useRef<EventSource | null>(null);
+  const lastSseRefetchAt = useRef(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -64,38 +67,30 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
     refresh().finally(() => setLoading(false));
   }, [open, refresh]);
 
-  // Live updates via SSE while the drawer is open so freshly-rendered
-  // images appear without the user having to close + reopen.
+  // Live updates via the shared status stream while the drawer is open.
   useEffect(() => {
     if (!open) return;
-    const url = api.statusStreamUrl(projectId);
-    let es: EventSource;
-    try {
-      es = new EventSource(url);
-    } catch {
-      return;
-    }
-    sseRef.current = es;
     let t: ReturnType<typeof setTimeout> | null = null;
-    es.onmessage = (ev) => {
-      try {
-        const payload = JSON.parse(ev.data);
-        if (!payload?.phase) return;
-        if (
-          payload.phase === 'images' ||
-          payload.phase === 'image' ||
-          payload.phase === 'voice' ||
-          payload.phase === 'video'
-        ) {
-          if (t) clearTimeout(t);
-          t = setTimeout(refresh, 500);
-        }
-      } catch {
-        /* ignore */
+    const MIN_REFETCH_MS = 1200;
+    const unsubscribe = subscribeProjectStatus(projectId, (payload: any) => {
+      if (!payload?.phase) return;
+      if (
+        payload.phase === 'images' ||
+        payload.phase === 'image' ||
+        payload.phase === 'voice' ||
+        payload.phase === 'video'
+      ) {
+        if (t) clearTimeout(t);
+        t = setTimeout(() => {
+          const now = Date.now();
+          if (now - lastSseRefetchAt.current < MIN_REFETCH_MS) return;
+          lastSseRefetchAt.current = now;
+          void refresh();
+        }, 500);
       }
-    };
+    });
     return () => {
-      es.close();
+      unsubscribe();
       if (t) clearTimeout(t);
     };
   }, [open, projectId, refresh]);
@@ -235,6 +230,9 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
     [project]
   );
 
+  const sceneEditingLocked =
+    !project || !isSceneContentEditable(project.status);
+
   return (
     <>
       {/* Backdrop */}
@@ -259,8 +257,7 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
             <div>
               <h2 className="text-base font-semibold text-white">Scenes</h2>
               <p className="text-[11px] text-ink-100/60">
-                Tweak any scene without leaving this step. Changes are saved
-                per scene.
+                Same scene fields as the <span className="text-white/90">Script</span> step — open this from anywhere to adjust narration, visual prompt, product reference, or regenerate images. Changes save per scene.
               </p>
             </div>
             <button
@@ -284,6 +281,12 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
             </div>
           )}
 
+          {project && sceneEditingLocked && (
+            <div className="mx-6 mt-3 rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/95">
+              View only — this project is past the stage where scene text, prompts, and product references can be edited. Use the step nav to review earlier steps.
+            </div>
+          )}
+
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
             {loading && !project && (
               <div className="text-xs text-ink-100/60">Loading…</div>
@@ -300,10 +303,7 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
                   scene={scene}
                   edits={edits[scene.id]}
                   busyLabel={busy[scene.id] || null}
-                  locked={
-                    project.status === 'generating' ||
-                    project.status === 'assembling'
-                  }
+                  locked={sceneEditingLocked}
                   onEdit={(patch) => setEdit(scene.id, patch)}
                   onSave={() => saveScene(scene)}
                   onRegenerate={() => regenerateScene(scene)}
@@ -363,7 +363,10 @@ function SceneRow({
           <div className="text-[11px] uppercase tracking-wider text-brand-100/80">
             Scene {scene.sceneIndex + 1}
           </div>
-          <StatusPill status={scene.status} />
+          <StatusPill
+            status={scene.status}
+            hasImages={(scene.imageVariants?.length || 0) > 0}
+          />
         </div>
         <div className="flex items-center gap-1.5">
           <button
@@ -397,7 +400,7 @@ function SceneRow({
               />
             ) : (
               <div className="flex h-full items-center justify-center text-[10px] text-ink-100/50">
-                {scene.status === 'failed' ? 'Failed' : 'Generating…'}
+                {isSceneImageGenerationFailed(scene) ? 'Failed' : 'Generating…'}
               </div>
             )}
           </div>
@@ -473,7 +476,7 @@ function SceneRow({
               Product reference
             </div>
             <div className="text-[10px] text-ink-100/60">
-              Used as image input so the product stays consistent across regenerations.
+              Used when generating image variants. Add or replace it before you regenerate this scene so the next batch picks it up. For <span className="text-white/90">where</span> the product sits in-frame (start vs end of shot), spell that out in the visual prompt above.
             </div>
           </div>
           {scene.productReferenceSignedUrl && (
@@ -531,18 +534,22 @@ function SceneRow({
   );
 }
 
-function StatusPill({ status }: { status: string }) {
+function StatusPill({ status, hasImages }: { status: string; hasImages: boolean }) {
   const tone =
-    status === 'failed'
-      ? 'bg-rose-500/15 text-rose-200 border-rose-400/30'
-      : status === 'image-ready' || status === 'video-ready'
-        ? 'bg-emerald-500/15 text-emerald-200 border-emerald-400/30'
-        : 'bg-white/5 text-ink-100/70 border-white/15';
+    status === 'failed' && hasImages
+      ? 'bg-amber-500/15 text-amber-100 border-amber-400/30'
+      : status === 'failed'
+        ? 'bg-rose-500/15 text-rose-200 border-rose-400/30'
+        : status === 'image-ready' || status === 'video-ready'
+          ? 'bg-emerald-500/15 text-emerald-200 border-emerald-400/30'
+          : 'bg-white/5 text-ink-100/70 border-white/15';
+  const label =
+    status === 'failed' && hasImages ? 'failed (post-image)' : status;
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] ${tone}`}
     >
-      {status}
+      {label}
     </span>
   );
 }

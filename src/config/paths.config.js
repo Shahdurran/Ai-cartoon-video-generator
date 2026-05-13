@@ -49,7 +49,6 @@ const paths = {
  */
 async function initializeDirectories() {
   const requiredDirs = [
-    paths.videoBank,
     paths.output,
     paths.temp,
     paths.storage,
@@ -57,10 +56,7 @@ async function initializeDirectories() {
     paths.publicFonts,
     paths.testOutput,
     paths.effects,
-    paths.channels,
-    paths.templates,
-    paths.projects,
-    paths.batches,
+    path.join(projectRoot, 'music-library'),
   ];
 
   console.log('📁 Initializing directories...');

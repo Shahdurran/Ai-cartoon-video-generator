@@ -23,6 +23,8 @@ export function NewProjectForm({ styles }: Props) {
   const router = useRouter();
   const [mode, setMode] = useState<'topic' | 'rewrite'>('topic');
   const [topic, setTopic] = useState('');
+  /** Display name for the project when rewriting from an existing script (stored as `topic` in the API). */
+  const [videoTitle, setVideoTitle] = useState('');
   const [sourceScript, setSourceScript] = useState('');
   const [styleId, setStyleId] = useState(styles[0]?.id || '');
   const [sceneCount, setSceneCount] = useState(5);
@@ -52,13 +54,17 @@ export function NewProjectForm({ styles }: Props) {
     setError(null);
     if (!styleId) return setError('Please choose a style');
     if (mode === 'topic' && !topic.trim()) return setError('Topic is required');
-    if (mode === 'rewrite' && !sourceScript.trim())
-      return setError('Source script is required');
+    if (mode === 'rewrite') {
+      if (!videoTitle.trim()) return setError('Video title is required');
+      if (!sourceScript.trim()) return setError('Source script is required');
+    }
 
     setSubmitting(true);
     try {
       const { project } = await api.createProject({
-        topic: mode === 'topic' ? topic : undefined,
+        // Rewrite mode: title is the project name; script is the rewrite input.
+        // Topic mode: the topic textarea is both the idea and the stored title.
+        topic: mode === 'topic' ? topic : videoTitle.trim(),
         sourceScript: mode === 'rewrite' ? sourceScript : undefined,
         styleId,
         sceneCount,
@@ -104,13 +110,32 @@ export function NewProjectForm({ styles }: Props) {
             className="field"
           />
         ) : (
-          <textarea
-            value={sourceScript}
-            onChange={(e) => setSourceScript(e.target.value)}
-            placeholder="Paste an existing script — it will be broken into scenes"
-            rows={8}
-            className="field font-mono"
-          />
+          <div className="space-y-4">
+            <label className="block">
+              <span className="label mb-1.5 block">Video title</span>
+              <input
+                type="text"
+                value={videoTitle}
+                onChange={(e) => setVideoTitle(e.target.value)}
+                placeholder="e.g. Summer launch promo — 60s cut"
+                className="field"
+                autoComplete="off"
+              />
+              <p className="mt-1.5 text-[11px] text-ink-200/65">
+                This name appears on your dashboard and project pages. It is separate from the script below.
+              </p>
+            </label>
+            <label className="block">
+              <span className="label mb-1.5 block">Existing script</span>
+              <textarea
+                value={sourceScript}
+                onChange={(e) => setSourceScript(e.target.value)}
+                placeholder="Paste an existing script — it will be broken into scenes"
+                rows={8}
+                className="field font-mono"
+              />
+            </label>
+          </div>
         )}
       </section>
 

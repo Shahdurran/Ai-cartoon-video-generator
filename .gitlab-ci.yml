@@ -146,12 +146,12 @@ deploy_production:
       module.exports = {
         apps: [{
           name: 'video-generator',
-          script: 'server.js',
+          script: 'server-new.js',
           instances: 1,
           exec_mode: 'fork',
           env: {
             NODE_ENV: 'production',
-            PORT: 3000,
+            PORT: 4000,
             PATH: '/opt/whisper-env/bin:' + process.env.PATH,
             PYTHONPATH: '/opt/whisper-env/lib/python*/site-packages',
             PYTHON_PATH: '/opt/whisper-env/bin/python'
@@ -192,11 +192,11 @@ deploy_production:
       pm2 logs video-generator --lines 10 --nostream || echo "No logs available yet"
       
       echo "✅ Deployment completed successfully!"
-      echo "🌐 Application should be available at http://$(curl -s ifconfig.me):3000"
+      echo "🌐 Application should be available at http://$(curl -s ifconfig.me):4000"
       EOF
   environment:
     name: production
-    url: http://$SERVER_IP:3000
+    url: http://$SERVER_IP:4000
   only:
     - main
   when: manual

@@ -71,4 +71,23 @@ async function listByProject(projectId) {
   return rows;
 }
 
-module.exports = { create, update, findById, listByProject };
+async function deleteByProject(projectId) {
+  await query(`DELETE FROM hook_variants WHERE project_id = $1`, [projectId]);
+}
+
+async function deleteFailedByProject(projectId) {
+  const { rowCount } = await query(
+    `DELETE FROM hook_variants WHERE project_id = $1 AND status = 'failed'`,
+    [projectId]
+  );
+  return rowCount;
+}
+
+module.exports = {
+  create,
+  update,
+  findById,
+  listByProject,
+  deleteByProject,
+  deleteFailedByProject,
+};

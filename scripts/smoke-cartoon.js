@@ -6,7 +6,7 @@
  *
  * or:
  *
- *   BACKEND_URL=http://localhost:3000 node scripts/smoke-cartoon.js
+ *   BACKEND_URL=http://localhost:4000 node scripts/smoke-cartoon.js
  *
  * Exit code is non-zero on any failure so it can be wired into CI.
  *
@@ -16,7 +16,7 @@
 
 /* eslint-disable no-console */
 
-const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:4000').replace(/\/+$/, '');
 const SKIP_HOOKS = process.env.SKIP_HOOKS === '1';
 const TOPIC = process.env.SMOKE_TOPIC || 'Why octopuses rule the ocean';
 const SCENE_COUNT = parseInt(process.env.SMOKE_SCENES || '2', 10);

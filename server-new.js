@@ -9,42 +9,30 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 const app = require('./src/app');
 const { closeQueues } = require('./src/queues');
+const { setupCartoonProcessors } = require('./src/queues/setupCartoonProcessors');
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4000;
 const HOST = process.env.HOST || '0.0.0.0';
 
-// Start server
-const server = app.listen(PORT, HOST, () => {
-  console.log('\n' + '='.repeat(60));
-  console.log('🚀 FFmpeg Video Generator Server v2.0.0');
-  console.log('='.repeat(60));
-  console.log(`📍 Server running on: http://${HOST}:${PORT}`);
-  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📊 Queue monitoring: npm run queue:monitor`);
-  console.log('='.repeat(60));
-  console.log('\n✨ Features:');
-  console.log('  • Bull Queue with Redis for job management');
-  console.log('  • Claude API for script generation');
-  console.log('  • Fal.AI for image generation');
-  console.log('  • Genaipro.vn for voice generation (primary)');
-  console.log('  • AssemblyAI for transcription');
-  console.log('  • Batch video processing');
-  console.log('  • Channel & template management');
-  console.log('\n📚 API Documentation:');
-  console.log(`  Main: http://${HOST}:${PORT}/`);
-  console.log(`  Health: http://${HOST}:${PORT}/api/health`);
-  console.log(`  Queues: http://${HOST}:${PORT}/api/v2/queue`);
-  console.log('='.repeat(60) + '\n');
-});
+let server;
+
+async function bootstrapQueues() {
+  try {
+    await setupCartoonProcessors();
+  } catch (err) {
+    console.warn('⚠️  Cartoon processors not initialised:', err.message);
+  }
+}
 
 // Graceful shutdown
 async function gracefulShutdown(signal) {
   console.log(`\n⚠️  Received ${signal}, shutting down gracefully...`);
-  
-  // Close server
-  server.close(() => {
-    console.log('✅ HTTP server closed');
-  });
+
+  if (server) {
+    server.close(() => {
+      console.log('✅ HTTP server closed');
+    });
+  }
 
   // Close queues
   try {
@@ -73,5 +61,25 @@ process.on('unhandledRejection', (reason, promise) => {
   gracefulShutdown('UNHANDLED_REJECTION');
 });
 
-module.exports = server;
+(async () => {
+  await bootstrapQueues();
 
+  server = app.listen(PORT, HOST, () => {
+    console.log('\n' + '='.repeat(60));
+    console.log('🚀 AI Cartoon Generator API v2.0.0');
+    console.log('='.repeat(60));
+    console.log(`📍 Server running on: http://${HOST}:${PORT}`);
+    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`📊 Cartoon queue monitor: npm run queue:monitor`);
+    console.log('='.repeat(60));
+    console.log('\n✨ Pipeline:');
+    console.log('  • Bull + Redis (cartoon queues only)');
+    console.log('  • Claude, Fal.AI / Higgsfield, ElevenLabs, AssemblyAI, FFmpeg');
+    console.log('\n📚 Entrypoints:');
+    console.log(`  Main: http://${HOST}:${PORT}/`);
+    console.log(`  Health: http://${HOST}:${PORT}/api/health`);
+    console.log('='.repeat(60) + '\n');
+  });
+})();
+
+module.exports = app;

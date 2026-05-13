@@ -34,6 +34,7 @@ module.exports = async function sceneScriptProcessor(job) {
     totalDurationSeconds = null,
     language = 'English',
     tone = 'dramatic',
+    multiShotTargetSeconds = 2.5,
   } = job.data;
 
   if (!projectId) throw new Error('projectId required');
@@ -48,6 +49,7 @@ module.exports = async function sceneScriptProcessor(job) {
       language,
       tone,
       mode,
+      multiShotTargetSeconds,
     });
 
     // bulkReplace (not bulkCreate) so re-running script gen cleanly wipes

@@ -6,17 +6,10 @@
  */
 
 const Bull = require('bull');
-const { queueConfig, QUEUE_NAMES } = require('../src/config/queue.config');
+const { queueConfig } = require('../src/config/queue.config');
+const { QUEUE_NAMES } = require('../src/queues/cartoonQueues');
 
-const QUEUE_LIST = [
-  QUEUE_NAMES.SCRIPT_GENERATION,
-  QUEUE_NAMES.IMAGE_GENERATION,
-  QUEUE_NAMES.VOICE_GENERATION,
-  QUEUE_NAMES.VIDEO_PROCESSING,
-  QUEUE_NAMES.BATCH_PROCESSING,
-  QUEUE_NAMES.TRANSCRIPTION,
-  'pipeline',
-];
+const QUEUE_LIST = Object.values(QUEUE_NAMES);
 
 async function clearAllQueues() {
   console.log('🚨 EMERGENCY: Clearing all Redis queues...\n');
@@ -92,6 +85,16 @@ async function clearAllQueues() {
       
     } catch (error) {
       console.error(`   ❌ Error clearing ${name}:`, error.message);
+    }
+  }
+
+  console.log('\n▶️  Step 2b: Resuming queues (clear script pauses in step 1)...');
+  for (const [name, queue] of Object.entries(queues)) {
+    try {
+      await queue.resume(true);
+      console.log(`   ✅ Resumed: ${name}`);
+    } catch (error) {
+      console.log(`   ⚠️  ${name}: ${error.message}`);
     }
   }
 

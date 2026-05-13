@@ -7,7 +7,6 @@
 !.env.example
 node_modules
 web
-frontend
 storage/tmp
 storage/outputs
 storage/input

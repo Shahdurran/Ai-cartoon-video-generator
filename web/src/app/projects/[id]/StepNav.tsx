@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import type { ProjectStatus } from '@/lib/api';
 
 type Step = {
-  key: 'script' | 'images' | 'videos' | 'final';
+  key: 'script' | 'images' | 'shots' | 'videos' | 'final';
   label: string;
   href: (id: string) => string;
 };
@@ -15,6 +15,10 @@ const STEPS: Step[] = [
   // ?stay=1 stops the project page's status-based redirect so the user
   // can actually land here once the project has moved past this step.
   { key: 'images', label: 'Images & settings', href: (id) => `/projects/${id}?stay=1` },
+  // Shots: optional cinematic multi-shot review. Only shown when the
+  // project has reached images-review and either has multi-shot enabled
+  // on any scene or the user can opt in.
+  { key: 'shots', label: 'Cinematic shots', href: (id) => `/projects/${id}/shots` },
   { key: 'videos', label: 'Scene videos', href: (id) => `/projects/${id}/videos` },
   { key: 'final', label: 'Final cut', href: (id) => `/projects/${id}/final` },
 ];
@@ -30,6 +34,13 @@ function maxReachableStep(status: ProjectStatus | string): Step['key'] {
     return 'videos';
   }
   if (
+    status === 'shots-review' ||
+    status === 'shot-images-pending' ||
+    status === 'shot-images-review'
+  ) {
+    return 'shots';
+  }
+  if (
     status === 'images-pending' ||
     status === 'images-review' ||
     status === 'images-ready'
@@ -39,7 +50,7 @@ function maxReachableStep(status: ProjectStatus | string): Step['key'] {
   return 'script';
 }
 
-const ORDER: Step['key'][] = ['script', 'images', 'videos', 'final'];
+const ORDER: Step['key'][] = ['script', 'images', 'shots', 'videos', 'final'];
 
 function isReachable(target: Step['key'], reached: Step['key']) {
   return ORDER.indexOf(target) <= ORDER.indexOf(reached);
@@ -47,6 +58,7 @@ function isReachable(target: Step['key'], reached: Step['key']) {
 
 function activeStepFromPath(path: string): Step['key'] | null {
   if (path.endsWith('/script')) return 'script';
+  if (path.endsWith('/shots')) return 'shots';
   if (path.endsWith('/videos')) return 'videos';
   if (path.endsWith('/final')) return 'final';
   if (path.endsWith('/status')) return 'videos'; // status streams into videos-review

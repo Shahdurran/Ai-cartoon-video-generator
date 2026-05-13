@@ -4,10 +4,10 @@
  * to R2. Built alongside the existing ImageService rather than rewriting it,
  * so legacy flows are untouched.
  *
- * Primary model: Nano Banana 2 (fal-ai/nano-banana-2). Google's Gemini 3.1
- * Flash Image -- reasoning-guided generation with accurate text rendering,
- * character consistency across frames, and vibrant output. See
- * https://fal.ai/docs/model-api-reference/image-generation-api/nano-banana-2
+ * Primary model: Nano Banana 2 (fal-ai/nano-banana-2). When the user
+ * attached a product reference image and Higgsfield is unavailable, the Fal
+ * fallback uses fal-ai/nano-banana-2/edit with `image_urls` so the packshot
+ * is still fed into generation.
  *
  * Fallback chain (per variant) if Nano Banana 2 fails:
  *   1. Nano Banana 2    (fal-ai/nano-banana-2)       -- primary
@@ -63,6 +63,35 @@ function composeFinalPrompt(positivePrompt, negativePrompt) {
   return `${positivePrompt}. Avoid: ${negativePrompt}`;
 }
 
+function clipText(text, maxLen) {
+  const s = String(text || '').trim();
+  if (!s) return '';
+  if (s.length <= maxLen) return s;
+  return `${s.slice(0, Math.max(0, maxLen - 3)).trim()}...`;
+}
+
+function applyCharacterConsistencyPrompt(basePrompt, characterConsistency = null) {
+  if (!characterConsistency || !characterConsistency.anchorPrompt) {
+    return basePrompt;
+  }
+  const anchor = clipText(characterConsistency.anchorPrompt, 700);
+  const refs = Array.isArray(characterConsistency.anchorSceneIndices)
+    ? characterConsistency.anchorSceneIndices.join(', ')
+    : '';
+  const refsLine = refs ? `Reference scenes: ${refs}.` : 'Reference scenes: prior scenes.';
+
+  return [
+    'Character continuity requirement:',
+    'Keep the recurring main character visually consistent with the established identity from earlier scenes.',
+    refsLine,
+    `Anchor description from earlier scenes: ${anchor}`,
+    'Preserve facial structure, hair color/style, age range, skin tone, body build, and signature outfit elements.',
+    'Allow normal variation in camera angle, pose, lighting, and expression. Only change identity/outfit when the scene explicitly requires it.',
+    '',
+    basePrompt,
+  ].join('\n');
+}
+
 function extractAxiosError(err) {
   if (err.response) {
     const status = err.response.status;
@@ -101,6 +130,7 @@ function classifyImageError(message) {
     m.includes('quota') ||
     m.includes('insufficient') ||
     m.includes('not_enough_credits') ||
+    m.includes('not enough credits') ||
     m.includes('out of credits') ||
     m.includes('payment required') ||
     m.includes('402')
@@ -178,23 +208,54 @@ async function callFluxSchnell({ prompt, aspectRatio, seed, apiKey }) {
 }
 
 /**
+ * Soul uses either a registered custom reference (Soul ID) or `image_url`
+ * for product conditioning; the text prompt still drives most of the layout.
+ * Without explicit instructions the model often invents generic props.
+ */
+function buildHiggsfieldPromptWithProductRef(userPrompt) {
+  return [
+    'The client supplied a registered product reference (Soul custom reference / conditioning image) — that is the actual product (exact packaging, logo, colors, shape, and proportions).',
+    'Reproduce that specific product in the output. Do not substitute a different product, generic scrolls, random bottles, or unrelated props in its place.',
+    'If the scene text says the character holds or presents this product, both hands must interact with it: show fingers wrapped around it or clearly presenting it — never empty fists, hands behind the back, or cropped-away hands when holding is required.',
+    'The following text describes the scene, camera, characters, and how the product should appear (placement, hands, table, etc.). Obey it while keeping the product visually consistent with that reference.',
+    '',
+    userPrompt,
+  ].join(' ');
+}
+
+/**
  * Higgsfield Soul image generation. Faster than the Fal cascade in our
  * benchmarks (single-digit seconds vs. 15-30s for Nano Banana 2). Used as
  * the primary provider when IMAGE_PROVIDER=higgsfield (the default in
  * .env.example) and HIGGSFIELD_API_KEY+SECRET are set.
  *
- * Supports image-to-image via `imageUrl` so the per-scene product
- * reference (when set) keeps the product identity consistent across
- * regenerations. The Soul docs only show `image_url` as a single-value
- * parameter; we feed the product reference into it directly.
+ * When a Higgsfield Soul ID exists (`productCustomReferenceId`), uses
+ * `custom_reference_id` (+ strength) for stronger identity lock; otherwise
+ * falls back to `image_url` with the product image URL.
  */
-async function callHiggsfield({ prompt, aspectRatio, seed, productReferenceUrl, soul = {} }) {
+async function callHiggsfield({
+  prompt,
+  aspectRatio,
+  seed,
+  productReferenceUrl,
+  productCustomReferenceId,
+  soul = {},
+}) {
+  const promptForModel = productReferenceUrl || productCustomReferenceId
+    ? buildHiggsfieldPromptWithProductRef(prompt)
+    : prompt;
+  let strength = 0.85;
+  if (typeof soul.customReferenceStrength === 'number' && Number.isFinite(soul.customReferenceStrength)) {
+    strength = Math.min(1, Math.max(0, soul.customReferenceStrength));
+  }
   const result = await higgsfield.generateOne({
-    prompt,
+    prompt: promptForModel,
     aspectRatio,
     resolution: soul.resolution === '1080p' ? '1080p' : '720p',
     seed,
-    imageUrl: productReferenceUrl || null,
+    imageUrl: productCustomReferenceId ? null : (productReferenceUrl || null),
+    customReferenceId: productCustomReferenceId || null,
+    customReferenceStrength: productCustomReferenceId ? strength : undefined,
   });
   return {
     url: result.url,
@@ -206,7 +267,21 @@ async function callHiggsfield({ prompt, aspectRatio, seed, productReferenceUrl, 
   };
 }
 
-async function callNanoBanana({ prompt, aspectRatio, seed, apiKey, nano = {} }) {
+function buildNanoBananaProductRefPrompt(userPrompt) {
+  return [
+    'EDIT TASK: place the exact product shown in the first reference image INTO the scene below.',
+    'The reference is the client\'s real product — preserve its packaging, label text, typography, colors, shape, proportions, and finish. Treat the reference as ground truth for the product.',
+    'Do not substitute a different product, invent new packaging, or replace it with generic scrolls, bottles, boxes, or props.',
+    'If the scene text says a character holds, presents, or uses the product: the product must appear in the frame at the size implied by the scene, held in/near the character\'s hands with visible contact (fingers wrapped or palm supporting it), label facing the camera when plausible. Never show empty fists, hands behind the back, or cropped hands when holding is required.',
+    'If the scene implies the product is on a surface, place it prominently on that surface so its label is legible.',
+    'Match the scene\'s illustration style, lighting, and composition while keeping the product photographically faithful to the reference.',
+    '',
+    'SCENE:',
+    userPrompt,
+  ].join('\n');
+}
+
+async function callNanoBanana({ prompt, aspectRatio, seed, apiKey, nano = {}, productReferenceUrl = null }) {
   const outFmt = ['jpeg', 'png', 'webp'].includes(nano.output_format) ? nano.output_format : 'png';
   const resStr = NANO_BANANA_RESOLUTIONS.has(nano.resolution) ? nano.resolution : '1K';
   const tol = ['1', '2', '3', '4', '5', '6'].includes(String(nano.safety_tolerance))
@@ -214,8 +289,17 @@ async function callNanoBanana({ prompt, aspectRatio, seed, apiKey, nano = {} }) 
     : '4';
   const ratio = NANO_BANANA_ASPECT_RATIOS.has(aspectRatio) ? aspectRatio : 'auto';
 
+  const baseModelId = (nano.imageModelId || 'fal-ai/nano-banana-2').replace(/^\//, '');
+  const canUseProductEdit =
+    Boolean(productReferenceUrl) &&
+    (baseModelId === 'fal-ai/nano-banana-2' || baseModelId === 'fal-ai/nano-banana-2/t2i');
+  const endpointId = canUseProductEdit ? 'fal-ai/nano-banana-2/edit' : baseModelId;
+  const promptForModel = canUseProductEdit
+    ? buildNanoBananaProductRefPrompt(prompt)
+    : prompt;
+
   const body = {
-    prompt,
+    prompt: promptForModel,
     aspect_ratio: ratio,
     num_images: 1,
     output_format: outFmt,
@@ -229,12 +313,26 @@ async function callNanoBanana({ prompt, aspectRatio, seed, apiKey, nano = {} }) 
   if (nano.thinking_level === 'minimal' || nano.thinking_level === 'high') {
     body.thinking_level = nano.thinking_level;
   }
+  if (canUseProductEdit) {
+    body.image_urls = [productReferenceUrl];
+    // Nano Banana 2 Edit tends to drop the product with a single packshot and
+    // loose styling prompt. Reasoning helps it actually place the product, and
+    // 2K gives it room to render the label legibly. Callers can still override
+    // via imageModelSettings.nanoBanana2.
+    if (!body.thinking_level) body.thinking_level = 'high';
+    if (!nano.resolution) body.resolution = '2K';
+  }
 
-  const endpointId = (nano.imageModelId || 'fal-ai/nano-banana-2').replace(/^\//, '');
   const data = await postToFal(`https://fal.run/${endpointId}`, body, apiKey);
   const image = data?.images?.[0];
   if (!image?.url) throw new Error('Nano Banana 2 response had no image URL');
-  return { url: image.url, width: image.width, height: image.height, seed: data?.seed, model: 'nano-banana-2' };
+  return {
+    url: image.url,
+    width: image.width,
+    height: image.height,
+    seed: data?.seed,
+    model: canUseProductEdit ? 'nano-banana-2-edit' : 'nano-banana-2',
+  };
 }
 
 /**
@@ -291,6 +389,7 @@ async function callImageCascade(prompt, ctx) {
     preferredModel,
     nanoBanana2,
     productReferenceUrl,
+    productCustomReferenceId,
     soul,
     variantIndex,
   } = ctx;
@@ -313,12 +412,13 @@ async function callImageCascade(prompt, ctx) {
           aspectRatio: higgsfieldAspectRatio,
           seed,
           productReferenceUrl,
+          productCustomReferenceId,
           soul: soul || {},
         });
         const ms = Date.now() - t0;
         console.log(
           `[image-bench] provider=${step.name} variant=${variantIndex} ms=${ms} ref=${
-            productReferenceUrl ? 'yes' : 'no'
+            productCustomReferenceId ? 'soul-id' : productReferenceUrl ? 'url' : 'no'
           }`
         );
         return { ...result, elapsedMs: ms };
@@ -332,6 +432,7 @@ async function callImageCascade(prompt, ctx) {
           seed,
           apiKey,
           nano: nanoBanana2 || {},
+          productReferenceUrl,
         });
       } else {
         result = await step.fn({
@@ -342,8 +443,12 @@ async function callImageCascade(prompt, ctx) {
         });
       }
       const ms = Date.now() - t0;
+      const refLog =
+        result.model === 'nano-banana-2-edit'
+          ? 'nano-edit'
+          : 'no';
       console.log(
-        `[image-bench] provider=${step.name} variant=${variantIndex} ms=${ms} ref=no`
+        `[image-bench] provider=${step.name} variant=${variantIndex} ms=${ms} ref=${refLog}`
       );
       return { ...result, elapsedMs: ms };
     } catch (err) {
@@ -373,10 +478,7 @@ async function downloadImageBuffer(url) {
  * @param {string} [input.aspectRatio='16:9']
  * @param {object} [input.imageModelSettings]  merged in worker from `projects.image_model_settings`
  * @param {string} [input.productReferenceUrl] Optional product reference image URL
- *                                            (signed R2 URL) used as
- *                                            image-to-image input by
- *                                            Higgsfield Soul to keep the
- *                                            product consistent across scenes.
+ * @param {string} [input.productCustomReferenceId] Higgsfield Soul ID from /v1/custom-references
  * @returns {Promise<Array<{variantIndex, r2Key, promptUsed, width, height, seed, modelUsed, elapsedMs}>>}
  */
 async function generateSceneVariants(input) {
@@ -389,6 +491,12 @@ async function generateSceneVariants(input) {
     aspectRatio = '16:9',
     imageModelSettings = {},
     productReferenceUrl = null,
+    productCustomReferenceId = null,
+    characterConsistency = null,
+    // Optional override so callers can route variants to a different R2
+    // prefix (used by the shot-images processor to write into
+    // .../shots/<shotId>/image-N.png instead of the scene-level key).
+    r2KeyBuilder = null,
   } = input;
 
   if (!projectId || !sceneId) throw new Error('projectId and sceneId required');
@@ -425,7 +533,8 @@ async function generateSceneVariants(input) {
 
   const positivePrompt = buildPositivePrompt(prompt, style);
   const negativePrompt = buildNegativePrompt(style);
-  const finalPrompt = composeFinalPrompt(positivePrompt, negativePrompt);
+  const consistentPrompt = applyCharacterConsistencyPrompt(positivePrompt, characterConsistency);
+  const finalPrompt = composeFinalPrompt(consistentPrompt, negativePrompt);
 
   const variants = [];
   const errors = [];
@@ -441,6 +550,7 @@ async function generateSceneVariants(input) {
         nanoBanana2,
         soul,
         productReferenceUrl,
+        productCustomReferenceId,
         imageProvider: imgCfg.imageProvider,
         variantIndex: i,
       });
@@ -451,7 +561,9 @@ async function generateSceneVariants(input) {
       const fmt = (nanoBanana2.output_format || 'png').toLowerCase();
       const ext = fmt === 'jpeg' ? 'jpg' : fmt === 'webp' ? 'webp' : 'png';
       const mime = ext === 'jpg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
-      const r2Key = r2Service.keys.sceneImage(projectId, sceneId, i, ext);
+      const r2Key = typeof r2KeyBuilder === 'function'
+        ? r2KeyBuilder(i, ext)
+        : r2Service.keys.sceneImage(projectId, sceneId, i, ext);
       await r2Service.upload(r2Key, buf, mime);
       variants.push({
         variantIndex: i,
@@ -482,7 +594,9 @@ async function generateSceneVariants(input) {
   const usedHiggsfield = variants.filter((v) => v.modelUsed === 'higgsfield-soul').length;
   console.log(
     `[image-bench] scene=${sceneId} variants=${variants.length}/${variantCount}` +
-      ` totalMs=${totalMs} higgsfield=${usedHiggsfield} ref=${productReferenceUrl ? 'yes' : 'no'}`
+      ` totalMs=${totalMs} higgsfield=${usedHiggsfield} ref=${
+        productCustomReferenceId ? 'soul-id' : productReferenceUrl ? 'url' : 'no'
+      }`
   );
 
   return variants;

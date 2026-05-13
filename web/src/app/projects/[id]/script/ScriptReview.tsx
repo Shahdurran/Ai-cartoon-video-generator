@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type Project, type Scene, type SceneDraft } from '@/lib/api';
+import { isSceneContentEditable } from '@/lib/projectEditPolicy';
 import { ImageModelPanel } from '../ModelSettingsPanel';
 
 type DraftScene = SceneDraft & { /** stable react key, not sent to backend */ key: string };
@@ -21,6 +22,15 @@ function toDraft(scenes: Project['scenes']): DraftScene[] {
       voiceoverText: s.voiceoverText,
       durationSeconds: Number(s.durationSeconds) || 5,
     }));
+}
+
+function newEmptyDraftScene(): DraftScene {
+  return {
+    key: nextKey(),
+    imagePrompt: '',
+    voiceoverText: '',
+    durationSeconds: 5,
+  };
 }
 
 export function ScriptReview({ initialProject }: { initialProject: Project }) {
@@ -93,16 +103,14 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
     setDirty(true);
   }
 
-  function addScene() {
-    setScenes((prev) => [
-      ...prev,
-      {
-        key: nextKey(),
-        imagePrompt: '',
-        voiceoverText: '',
-        durationSeconds: 5,
-      },
-    ]);
+  /** Insert a blank scene at `index` (0 = start, `length` = end). */
+  function insertSceneAt(index: number) {
+    setScenes((prev) => {
+      const next = prev.slice();
+      const at = Math.max(0, Math.min(index, next.length));
+      next.splice(at, 0, newEmptyDraftScene());
+      return next;
+    });
     setDirty(true);
   }
 
@@ -179,12 +187,13 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
       // bounce the user to the images step without flashing a "regenerating"
       // banner -- their existing variants are still good.
       if (!result.enqueued) {
-        router.push(`/projects/${project.id}?stay=1`);
-        return;
+        await router.push(`/projects/${project.id}?stay=1`);
+      } else {
+        await router.push(`/projects/${project.id}`);
       }
-      router.push(`/projects/${project.id}`);
     } catch (err: any) {
       setError(err.message || 'Failed to approve script');
+    } finally {
       setBusy(null);
     }
   }
@@ -302,15 +311,7 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
   // is now idempotent on the backend and only re-runs scenes whose prompts
   // actually changed. Once we move on to video generation we hard-lock the
   // editor because mutating scenes mid-Seedance would orphan video clips.
-  const editableStates = new Set([
-    'draft',
-    'scripted',
-    'script-review',
-    'images-pending',
-    'images-review',
-    'images-ready',
-  ]);
-  const locked = !editableStates.has(project.status);
+  const locked = !isSceneContentEditable(project.status);
   const inImagesPhase =
     project.status === 'images-pending' ||
     project.status === 'images-review' ||
@@ -329,6 +330,7 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
         <div className="rounded-xl border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-xs text-sky-100 animate-fade-in">
           Images have already been generated. Editing a scene&rsquo;s narration or
           prompt and re-approving will <span className="text-white font-medium">only regenerate images for the scenes you changed</span>.
+          Add or swap a <span className="text-white font-medium">product reference</span> before regenerating that scene so new variants pick it up.
           Use <span className="text-white font-medium">Regenerate all images</span> to redo every scene from scratch.
         </div>
       )}
@@ -367,14 +369,15 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
               className="btn-ghost !px-3 !py-1.5 !text-xs"
               title="Force regenerate every scene's images"
             >
-              {busy === 'approve' ? 'Working…' : 'Regenerate all images'}
+              {busy === 'approve' ? 'Processing…' : 'Regenerate all images'}
             </button>
           )}
           <button
             type="button"
             onClick={handleApproveClick}
             disabled={busy !== null || !canApprove || locked}
-            className="btn-primary !px-4 !py-2 !text-xs"
+            aria-busy={busy === 'approve'}
+            className="btn-primary !px-4 !py-2 !text-xs disabled:opacity-70 disabled:cursor-wait"
             title={
               locked
                 ? 'Script can no longer be approved -- project is past this stage'
@@ -386,7 +389,7 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
             }
           >
             {busy === 'approve'
-              ? 'Approving…'
+              ? 'Processing…'
               : inImagesPhase
                 ? 'Save & update images →'
                 : 'Approve & generate images →'}
@@ -397,6 +400,30 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
       {error && (
         <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200 animate-fade-in">
           {error}
+        </div>
+      )}
+
+      {scenes.length === 0 ? (
+        <div className="mb-3">
+          <button
+            type="button"
+            onClick={() => insertSceneAt(0)}
+            disabled={locked}
+            className="btn-ghost !px-3 !py-2 !text-xs w-full"
+          >
+            + Add scene
+          </button>
+        </div>
+      ) : (
+        <div className="mb-3">
+          <button
+            type="button"
+            onClick={() => insertSceneAt(0)}
+            disabled={locked}
+            className="btn-ghost !px-3 !py-2 !text-xs w-full"
+          >
+            + Add scene at start
+          </button>
         </div>
       )}
 
@@ -495,16 +522,18 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
         ))}
       </ol>
 
-      <div>
-        <button
-          type="button"
-          onClick={addScene}
-          disabled={locked}
-          className="btn-ghost !px-3 !py-2 !text-xs w-full"
-        >
-          + Add scene
-        </button>
-      </div>
+      {scenes.length > 0 && (
+        <div>
+          <button
+            type="button"
+            onClick={() => insertSceneAt(scenes.length)}
+            disabled={locked}
+            className="btn-ghost !px-3 !py-2 !text-xs w-full"
+          >
+            + Add scene at end
+          </button>
+        </div>
+      )}
       </div>
 
       <aside className="lg:col-span-1 space-y-6">
@@ -520,19 +549,21 @@ export function ScriptReview({ initialProject }: { initialProject: Project }) {
           <h3 className="font-medium text-white mb-2">What happens next?</h3>
           <ol className="list-decimal pl-4 space-y-1.5 text-ink-200/85">
             <li>
-              Optionally add a <span className="text-white">product reference</span> image
-              per scene so your product can appear in the first generated artwork.
-            </li>
-            <li>You approve the script.</li>
-            <li>
-              We queue <span className="text-white">3 image variants</span> per scene
-              using your image settings above.
+              After scenes exist, decide <span className="text-white">which scene(s)</span> should feature your product.
+              Add a <span className="text-white">product reference</span> photo per scene (or use{' '}
+              <span className="text-white">Apply to all</span> from one scene). Do this before you are happy with final images — the reference is used when variants are generated.
             </li>
             <li>
-              You pick the best image per scene (and tune voice, subtitles, music
-              while images render).
+              Use the <span className="text-white">visual prompt</span> to describe how the product appears (e.g. reveal at the end of the shot vs hero at the start). Same controls live in the floating{' '}
+              <span className="text-white">Scenes</span> panel on any step.
             </li>
-            <li>You hit <span className="text-white">Generate video</span>.</li>
+            <li>
+              When ready, approve — we queue <span className="text-white">3 image variants</span> per scene using your image settings above.
+            </li>
+            <li>
+              Pick the best image per scene, then tune voice, subtitles, and music while things render.
+            </li>
+            <li>You hit <span className="text-white">Generate video</span> when images are set.</li>
           </ol>
         </div>
       </aside>
@@ -600,8 +631,8 @@ function ScriptStepProductReference({
         <div>
           <div className="text-[11px] font-medium text-white">Product reference (optional)</div>
           <div className="text-[10px] text-ink-100/60 leading-snug mt-0.5">
-            Upload a packshot or product photo for this scene. It is passed into image generation so the
-            product can appear before the first render.{' '}
+            Best once this scene&rsquo;s role is clear: upload a packshot or product photo, then use the visual prompt above for placement (e.g. product on table at the start vs revealed at the end of the shot).
+            The file is sent into image generation — add or change it before approving / regenerating images for this scene.{' '}
             {!persistedOnServer && (
               <span className="text-amber-200/90">Save edits first — new scenes need a server id.</span>
             )}

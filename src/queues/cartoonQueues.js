@@ -16,6 +16,8 @@ const QUEUE_NAMES = {
   SEEDANCE_VIDEO: 'seedance-video-queue',
   FINAL_ASSEMBLY: 'final-assembly-queue',
   HOOK_GENERATOR: 'hook-generator-queue',
+  SHOT_IMAGES: 'cartoon-shot-images',
+  SHOT_VIDEO: 'cartoon-shot-video',
 };
 
 const queues = {
@@ -31,6 +33,18 @@ const queues = {
     defaultJobOptions: {
       ...queueConfig.defaultJobOptions,
       // Seedance jobs may poll for 20+ minutes; give plenty of timeout.
+      timeout: 40 * 60 * 1000,
+      attempts: 2,
+    },
+  }),
+  shotImages: new Bull(QUEUE_NAMES.SHOT_IMAGES, {
+    ...queueConfig,
+    defaultJobOptions: { ...queueConfig.defaultJobOptions, timeout: 10 * 60 * 1000 },
+  }),
+  shotVideo: new Bull(QUEUE_NAMES.SHOT_VIDEO, {
+    ...queueConfig,
+    defaultJobOptions: {
+      ...queueConfig.defaultJobOptions,
       timeout: 40 * 60 * 1000,
       attempts: 2,
     },

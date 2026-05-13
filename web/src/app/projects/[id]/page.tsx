@@ -49,9 +49,23 @@ export default async function ProjectPage({
     if (
       project.status === 'failed' &&
       project.scenes.length > 0 &&
-      project.scenes.every((s) => !!s.videoKey)
+      project.scenes.every((s) =>
+        s.multiShotEnabled
+          ? s.shots.length > 0 && s.shots.every((sh) => !!sh.videoKey)
+          : !!s.videoKey
+      )
     ) {
       redirect(`/projects/${project.id}/videos`);
+    }
+
+    // If the user is in the new shots-review or shot-images-review states,
+    // route them to the dedicated /shots page.
+    if (
+      project.status === 'shots-review' ||
+      project.status === 'shot-images-pending' ||
+      project.status === 'shot-images-review'
+    ) {
+      redirect(`/projects/${project.id}/shots`);
     }
 
     const pipelineStates = new Set(['generating', 'assembling']);
@@ -70,7 +84,12 @@ export default async function ProjectPage({
   ]);
 
   const hasVideoRenders =
-    project.scenes.length > 0 && project.scenes.every((s) => !!s.videoKey);
+    project.scenes.length > 0 &&
+    project.scenes.every((s) =>
+      s.multiShotEnabled
+        ? s.shots.length > 0 && s.shots.every((sh) => !!sh.videoKey)
+        : !!s.videoKey
+    );
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-10">

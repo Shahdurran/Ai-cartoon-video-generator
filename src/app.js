@@ -12,16 +12,13 @@ const fs = require('fs-extra');
 // Import routes
 const routes = require('./routes');
 
-// Import queue setup
-const { setupProcessors } = require('./queues/setupProcessors');
-const { setupCartoonProcessors } = require('./queues/setupCartoonProcessors');
 const { runMigrations } = require('./db/migrate');
 
 // Initialize Express app
 const app = express();
 
 // ===== Middleware =====
-// Enable CORS for frontend (allow all localhost ports in development)
+// Enable CORS for the Next.js web app (allow all localhost ports in development)
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -55,8 +52,6 @@ app.use('/test-output', cors(), express.static(path.join(__dirname, '../test-out
 app.use('/output', cors(), express.static(path.join(__dirname, '../output')));
 app.use('/temp', cors(), express.static(path.join(__dirname, '../temp'))); // For audio/image preview
 app.use('/music-library', cors(), express.static(path.join(__dirname, '../music-library')));
-app.use('/person-videos', cors(), express.static(path.join(__dirname, '../person-videos')));
-app.use('/sound-waves', cors(), express.static(path.join(__dirname, '../sound-waves')));
 
 // ===== API Routes =====
 app.use('/api', routes);
@@ -64,20 +59,16 @@ app.use('/api', routes);
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
-    name: 'FFmpeg Video Generator API',
+    name: 'AI Cartoon Generator API',
     version: '2.0.0',
-    description: 'Advanced video generator with AI integrations and job queue management',
+    description: 'REST API for the Next.js web app (projects, styles, voices, music, queues)',
     endpoints: {
       health: '/api/health',
-      queues: '/api/v2/queue',
-      script: '/api/v2/script',
-      voice: '/api/v2/voice',
-      image: '/api/v2/image',
-      channel: '/api/v2/channel',
-      batch: '/api/v2/batch',
-      video: '/api/video',
+      styles: '/api/styles',
+      projects: '/api/projects',
+      voices: '/api/voices',
+      music: '/api/music',
     },
-    documentation: 'https://github.com/your-repo/readme',
   });
 });
 
@@ -99,14 +90,6 @@ app.use((req, res) => {
     method: req.method,
   });
 });
-
-// ===== Initialize Queue Processors =====
-setupProcessors();
-try {
-  setupCartoonProcessors();
-} catch (err) {
-  console.warn('⚠️  Cartoon processors not initialised:', err.message);
-}
 
 // ===== Optional: run migrations + seed on startup (Railway) =====
 // Seeding must wait for migrations to finish, otherwise it hits a db where
@@ -133,17 +116,13 @@ try {
 async function ensureDirectories() {
   const directories = [
     path.join(__dirname, '../public/videos'),
+    path.join(__dirname, '../public/fonts'),
     path.join(__dirname, '../public/thumbnails'),
     path.join(__dirname, '../test-output'),
     path.join(__dirname, '../output'),
     path.join(__dirname, '../temp'),
-    path.join(__dirname, '../video-bank'),
     path.join(__dirname, '../music-library'),
-    path.join(__dirname, '../storage/channels'),
-    path.join(__dirname, '../storage/templates'),
-    path.join(__dirname, '../storage/projects'),
-    path.join(__dirname, '../storage/batches'),
-    path.join(__dirname, '../storage/generated-assets'), // For step-by-step sessions
+    path.join(__dirname, '../storage'),
     path.join(__dirname, '../effects'),
   ];
 

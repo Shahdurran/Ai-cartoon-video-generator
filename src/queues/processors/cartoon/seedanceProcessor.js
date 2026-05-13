@@ -47,12 +47,35 @@ async function handleSubmit(job) {
   const project = await projectRepo.findById(projectId);
   if (!project) throw new Error(`Project ${projectId} not found`);
 
-  const { requestId, modelId } = await falVideo.submit({
-    imageUrl,
-    prompt: scene.imagePrompt,
-    projectVideoSettings: project.videoModelSettings || {},
-    sceneDurationSeconds: scene.durationSeconds,
-  });
+  let requestId;
+  let modelId;
+  try {
+    const res = await falVideo.submit({
+      imageUrl,
+      prompt: scene.imagePrompt,
+      projectVideoSettings: project.videoModelSettings || {},
+      sceneDurationSeconds: scene.durationSeconds,
+    });
+    requestId = res.requestId;
+    modelId = res.modelId;
+  } catch (err) {
+    const msg =
+      err?.message ||
+      (typeof err === 'string' ? err : JSON.stringify(err?.response?.data || err));
+    console.error(
+      `[seedance/submit] FAILED project=${projectId} scene=${sceneId}:`,
+      msg
+    );
+    await sceneRepo.updateStatus(sceneId, 'failed', msg);
+    await pubsub.publish(projectId, {
+      sceneId,
+      phase: 'video',
+      status: 'failed',
+      error: msg,
+    });
+    await maybeMarkVideosReady(projectId);
+    throw err;
+  }
 
   await sceneRepo.setFalRequestId(sceneId, requestId);
   await pubsub.publish(projectId, { sceneId, phase: 'video', status: 'queued', requestId });
@@ -133,7 +156,17 @@ async function handlePoll(job) {
   }
 
   // Any other terminal state (FAILED, CANCELLED, etc.) => error out.
-  const errorMsg = `Seedance returned terminal state: ${phase}`;
+  const falDetail = status?.error || status?.detail || status?.data?.error;
+  const errorMsg =
+    typeof falDetail === 'string' && falDetail.trim()
+      ? falDetail.trim()
+      : typeof falDetail === 'object' && falDetail
+        ? JSON.stringify(falDetail)
+        : `Seedance returned terminal state: ${phase}`;
+  console.error(
+    `[seedance/poll] TERMINAL scene=${sceneId} project=${projectId} phase=${phase}:`,
+    errorMsg
+  );
   await sceneRepo.updateStatus(sceneId, 'failed', errorMsg);
   await pubsub.publish(projectId, { sceneId, phase: 'video', status: 'failed', error: errorMsg });
   await maybeMarkVideosReady(projectId);
@@ -142,31 +175,14 @@ async function handlePoll(job) {
 
 /**
  * Move the project into 'videos-review' once every scene either has a
- * Seedance render or has terminally failed. The user explicitly approves
- * the renders (POST /:id/approve-videos) before final assembly runs --
- * mirrors the script-review and images-review gates.
+ * Seedance render or has terminally failed. Defers to the shot-aware
+ * implementation in shotVideoProcessor so projects mixing single-shot
+ * scenes and multi-shot scenes both gate correctly.
  */
 async function maybeMarkVideosReady(projectId) {
-  const project = await projectRepo.findById(projectId);
-  if (!project) return;
-  if (
-    project.status === 'complete' ||
-    project.status === 'assembling' ||
-    project.status === 'videos-review'
-  ) {
-    return;
-  }
-
-  const scenes = await sceneRepo.findByProject(projectId);
-  if (scenes.length === 0) return;
-
-  const allDone = scenes.every(
-    (s) => !!s.videoKey || s.status === 'failed'
-  );
-  if (!allDone) return;
-
-  await projectRepo.updateStatus(projectId, 'videos-review');
-  await pubsub.publish(projectId, { phase: 'videos', status: 'review' });
+  // Lazy require to avoid a circular import at module load.
+  const shotVideoProcessor = require('./shotVideoProcessor');
+  return shotVideoProcessor.maybeMarkVideosReady(projectId);
 }
 
 // Back-compat alias -- old name was misleading once we added the review gate.

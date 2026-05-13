@@ -52,8 +52,8 @@ export default async function ScriptReviewPage({
         Review the <span className="text-gradient">script</span>
       </h1>
       <p className="text-sm text-ink-100/70 mb-8 animate-fade-up stagger-1">
-        Edit each scene&rsquo;s narration or visual prompt, add an optional product reference image per scene
-        before you approve, reorder or remove scenes. Nothing is generated until you approve.
+        Once scenes exist, edit narration and visual prompts, then add product photos on the scenes where they belong — usually after you can see the full breakdown.
+        Use the visual prompt to describe how the product appears in-frame (e.g. at the start vs end of the shot). The floating <span className="text-white">Scenes</span> button (shortcut <kbd className="rounded border border-white/15 bg-white/10 px-1.5 py-0.5 text-[11px]">S</kbd>) opens the same controls from Images, Videos, or Final so you do not have to jump back here. Nothing is generated until you approve.
       </p>
       <ScriptReview initialProject={project} />
     </div>

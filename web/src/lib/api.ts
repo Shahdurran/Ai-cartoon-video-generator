@@ -39,11 +39,40 @@ export type MusicTrack = {
 export type SceneImage = {
   id: string;
   sceneId: string;
+  /** When this variant belongs to a shot (multi-shot scene), the shot id;
+   *  null for legacy scene-level variants used by single-shot scenes. */
+  shotId: string | null;
   variantIndex: number;
   r2Key: string;
   signedUrl: string | null;
   isCustomUpload: boolean;
   promptUsed: string | null;
+};
+
+/** Suggested shot inside a scene -- Claude proposes 2-4 of these per
+ *  scene during script generation; the user can opt into multi-shot
+ *  per scene to materialize them as real shot rows. */
+export type SuggestedShot = {
+  role: 'wide' | 'closeup' | 'detail' | 'reaction' | 'custom';
+  imagePrompt: string;
+};
+
+export type SceneShot = {
+  id: string;
+  sceneId: string;
+  shotIndex: number;
+  role: SuggestedShot['role'];
+  imagePrompt: string;
+  selectedImageId: string | null;
+  falRequestId: string | null;
+  videoKey: string | null;
+  videoSignedUrl: string | null;
+  durationSeconds: number;
+  status: string;
+  errorMessage: string | null;
+  errorCode: SceneErrorCode | null;
+  imageVariants: SceneImage[];
+  createdAt: string;
 };
 
 export type SceneErrorCode =
@@ -77,6 +106,20 @@ export type Scene = {
   productReferenceKey?: string | null;
   /** Renderable URL for the product reference image. */
   productReferenceSignedUrl?: string | null;
+  /**
+   * Higgsfield Soul custom reference id when registered; cleared when the
+   * product image key changes.
+   */
+  productCustomReferenceId?: string | null;
+  /** When true, this scene renders multiple Seedance shots cross-cut at
+   *  ~project.multiShotTargetSeconds intervals. The shots[] array carries
+   *  the per-shot prompt + selected image + rendered video. */
+  multiShotEnabled: boolean;
+  /** Claude's suggested 2-4 sub-shot prompts produced during script gen.
+   *  Used as the default seed when the user toggles multiShotEnabled on. */
+  suggestedShots: SuggestedShot[] | null;
+  /** Materialized shots when multiShotEnabled is true; empty otherwise. */
+  shots: SceneShot[];
 };
 
 /**
@@ -96,6 +139,9 @@ export type ProjectStatus =
   | 'images-pending'
   | 'images-review'
   | 'images-ready'    // legacy; behaves like images-review
+  | 'shots-review'    // user is editing per-scene multi-shot prompts
+  | 'shot-images-pending' // shots queued for image-variant generation
+  | 'shot-images-review'  // user picks variants for each shot
   | 'generating'
   | 'videos-review'   // per-scene videos rendered; user previews/approves before assembly
   | 'assembling'
@@ -212,6 +258,11 @@ export type Project = {
   videoModelSettings?: VideoModelSettings;
   musicTrackId: string | null;
   musicVolume: number;
+  /** Target window length (seconds) for multi-shot scenes. Default 2.5s.
+   *  Used by Claude script gen to size suggestedShots, by the shots-review
+   *  UI for the per-scene shot count default, and by the assembler to
+   *  allocate window lengths inside each multi-shot scene. */
+  multiShotTargetSeconds: number;
   subtitlesKey: string | null;
   subtitlesSignedUrl: string | null;
   /** Signed URL for user-uploaded subtitle font (.ttf/.otf), when present */
@@ -279,6 +330,26 @@ export const api = {
     ),
   // Music
   listMusic: () => request<{ tracks: MusicTrack[] }>('/api/music'),
+  uploadMusicTrack: async (file: File, name?: string) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (name?.trim()) fd.append('name', name.trim());
+    const res = await fetch(`${API_BASE}/api/music/upload`, {
+      method: 'POST',
+      body: fd,
+    });
+    if (!res.ok) {
+      let message = `${res.status} ${res.statusText}`;
+      try {
+        const body = await res.json();
+        if (body?.error) message = body.error;
+      } catch (_) {
+        /* ignore */
+      }
+      throw new Error(message);
+    }
+    return res.json() as Promise<{ track: MusicTrack }>;
+  },
 
   // Projects
   listProjects: () =>
@@ -362,8 +433,9 @@ export const api = {
 
   /**
    * Upload (or replace) the product reference image for a scene. The file
-   * is stored on R2 and used as `image_url` input for image generation so
-   * the product appears consistently across regenerations of that scene.
+   * is stored on R2. When Higgsfield runs first, the API registers a Soul
+   * custom reference from that URL before variants generate, then uses
+   * `custom_reference_id` (stronger than `image_url` alone).
    */
   uploadProductReference: async (
     projectId: string,
@@ -494,9 +566,90 @@ export const api = {
     ),
 
   generateHooks: (projectId: string, body: { hookDurationSeconds?: number; variantCount?: number } = {}) =>
-    request<{ enqueued: true; jobId: string }>(
+    request<{
+      enqueued: true;
+      jobId: string;
+      hookDurationSeconds: number;
+      variantCount: number;
+      hookVariants?: HookVariant[];
+    }>(
       `/api/projects/${projectId}/hooks`,
       { method: 'POST', body: JSON.stringify(body) }
+    ),
+
+  retryHookVariant: (projectId: string, hookId: string) =>
+    request<{ enqueued: true; jobId: string; hookVariant: HookVariant }>(
+      `/api/projects/${projectId}/hooks/retry`,
+      { method: 'POST', body: JSON.stringify({ hookId }) }
+    ),
+
+  clearFailedHooks: (projectId: string) =>
+    request<{ removed: number }>(
+      `/api/projects/${projectId}/hooks/failed`,
+      { method: 'DELETE' }
+    ),
+
+  // ---------------------------- Multi-shot --------------------------------
+
+  /** Toggle multi-shot for one scene. On enable the backend seeds shots
+   *  from suggestedShots; on disable it deletes the scene's shots (and
+   *  their variants/videos via cascade). */
+  setSceneMultiShot: (projectId: string, sceneId: string, enabled: boolean) =>
+    request<{ scene: Scene & { shots: SceneShot[] } }>(
+      `/api/projects/${projectId}/scenes/${sceneId}/multi-shot`,
+      { method: 'PATCH', body: JSON.stringify({ enabled }) }
+    ),
+
+  /** Bulk replace one scene's shot list (prompt edits, add/remove, reorder).
+   *  Re-numbers shot_index from 0. */
+  replaceShots: (
+    projectId: string,
+    sceneId: string,
+    shots: Array<{ role: SuggestedShot['role']; imagePrompt: string; durationSeconds?: number }>
+  ) =>
+    request<{ shots: SceneShot[] }>(
+      `/api/projects/${projectId}/scenes/${sceneId}/shots`,
+      { method: 'PUT', body: JSON.stringify({ shots }) }
+    ),
+
+  /** Approve the project's shot list -> kick off per-shot image generation
+   *  for every multi-shot scene. Idempotent: scenes whose shots already
+   *  have variants matching the current prompt are skipped. */
+  approveShots: (projectId: string, body: { variantCount?: number; force?: boolean } = {}) =>
+    request<{ enqueued: boolean; enqueuedCount: number; sceneCount: number }>(
+      `/api/projects/${projectId}/approve-shots`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+
+  selectShotImage: (
+    projectId: string, sceneId: string, shotId: string, sceneImageId: string
+  ) =>
+    request<{ shot: SceneShot }>(
+      `/api/projects/${projectId}/scenes/${sceneId}/shots/${shotId}/select-image`,
+      { method: 'PATCH', body: JSON.stringify({ sceneImageId }) }
+    ),
+
+  regenerateShotImage: (
+    projectId: string, sceneId: string, shotId: string,
+    body: { prompt?: string; variantCount?: number } = {}
+  ) =>
+    request<{ enqueued: true; jobId: string }>(
+      `/api/projects/${projectId}/scenes/${sceneId}/shots/${shotId}/regenerate-image`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+
+  /** Approve all per-shot variants -> kick off Seedance for every shot
+   *  AND any single-shot scenes that don't yet have a video render. */
+  approveShotImages: (projectId: string) =>
+    request<{ enqueued: true }>(
+      `/api/projects/${projectId}/approve-shot-images`,
+      { method: 'POST', body: JSON.stringify({}) }
+    ),
+
+  regenerateShotVideo: (projectId: string, sceneId: string, shotId: string) =>
+    request<{ enqueued: true; jobId: string }>(
+      `/api/projects/${projectId}/scenes/${sceneId}/shots/${shotId}/regenerate-video`,
+      { method: 'POST', body: JSON.stringify({}) }
     ),
 
   statusStreamUrl: (projectId: string) =>

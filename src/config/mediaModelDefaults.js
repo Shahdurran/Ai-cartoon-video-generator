@@ -1,6 +1,6 @@
 /**
  * Defaults and merge helpers for Fal image / video model settings (JSON on `projects`).
- * Docs: Nano Banana 2, Seedance 2.0 image-to-video.
+ * Docs: Nano Banana 2; video defaults to Seedance 1.0 Pro (2.0 optional in UI).
  */
 
 const DEFAULT_IMAGE_MODEL_SETTINGS = {
@@ -20,11 +20,17 @@ const DEFAULT_IMAGE_MODEL_SETTINGS = {
     enable_web_search: false,
     thinking_level: null,
   },
+  /** Higgsfield Soul — passed through to image jobs when provider is higgsfield */
+  higgsfieldSoul: {
+    resolution: '720p',
+    /** 0–1, forwarded as custom_reference_strength when a Soul ID is used */
+    customReferenceStrength: 0.85,
+  },
 };
 
 const DEFAULT_VIDEO_MODEL_SETTINGS = {
-  /** Fal queue model id */
-  videoModelId: 'bytedance/seedance-2.0/image-to-video',
+  /** Fal queue model id — default Seedance 1.0 Pro; user may switch to 2.0 in video settings */
+  videoModelId: 'fal-ai/bytedance/seedance/v1/pro/image-to-video',
   seedance20: {
     resolution: '720p',
     duration: 'auto',
@@ -45,6 +51,10 @@ function mergeImageModelSettings(stored = {}) {
     nanoBanana2: {
       ...base.nanoBanana2,
       ...(s.nanoBanana2 && typeof s.nanoBanana2 === 'object' ? s.nanoBanana2 : {}),
+    },
+    higgsfieldSoul: {
+      ...base.higgsfieldSoul,
+      ...(s.higgsfieldSoul && typeof s.higgsfieldSoul === 'object' ? s.higgsfieldSoul : {}),
     },
   };
 }

@@ -9,15 +9,7 @@ async function clearAllQueues() {
   try {
     console.log('🧹 Starting queue cleanup...\n');
 
-    const queueNames = [
-      'batchProcessing',
-      'pipeline',
-      'scriptGeneration',
-      'voiceGeneration',
-      'imageGeneration',
-      'videoProcessing',
-      'transcription'
-    ];
+    const queueNames = Object.keys(queues);
 
     let totalCleaned = 0;
     const summary = {};

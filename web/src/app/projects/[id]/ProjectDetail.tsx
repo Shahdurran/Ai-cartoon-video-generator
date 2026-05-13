@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, type Project, type Voice, type MusicTrack } from '@/lib/api';
+import { subscribeProjectStatus } from '@/lib/projectStatusStream';
+import { isSceneImageGenerationFailed } from '@/lib/sceneStatus';
 import { ScenePicker } from './ScenePicker';
 import { VoiceoverPanel } from './VoiceoverPanel';
 import { SubtitlePanel } from './SubtitlePanel';
@@ -19,59 +21,63 @@ type Props = {
 
 export function ProjectDetail({ initialProject, voices, tracks }: Props) {
   const router = useRouter();
+  const routerRef = useRef(router);
+  routerRef.current = router;
   const [project, setProject] = useState(initialProject);
+  const [musicTracks, setMusicTracks] = useState(tracks);
   const [musicModalOpen, setMusicModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reloadDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRefetchAt = useRef(0);
+  const projectIdRef = useRef(project.id);
+  projectIdRef.current = project.id;
 
-  // Live updates via SSE -- no more 3s polling. Image / voice / video phase
-  // events from the queue trigger a debounced refetch so signed URLs stay
-  // valid and per-scene status pills update in real time.
-  useEffect(() => {
-    const url = api.statusStreamUrl(project.id);
-    let es: EventSource | null = null;
+  const refresh = useCallback(async () => {
+    const id = projectIdRef.current;
     try {
-      es = new EventSource(url);
+      const { project: fresh } = await api.getProject(id);
+      setProject(fresh);
     } catch {
-      return;
+      /* ignore */
     }
+  }, []);
+
+  // Live updates via the shared project status stream. A single
+  // EventSource is reused across components (and survives React strict
+  // mode double-mount in dev) instead of opening N parallel streams.
+  useEffect(() => {
+    const MIN_REFETCH_MS = 1200;
 
     function scheduleReload() {
       if (reloadDebounce.current) clearTimeout(reloadDebounce.current);
-      reloadDebounce.current = setTimeout(refresh, 400);
+      reloadDebounce.current = setTimeout(() => {
+        const now = Date.now();
+        if (now - lastRefetchAt.current < MIN_REFETCH_MS) return;
+        lastRefetchAt.current = now;
+        void refresh();
+      }, 400);
     }
 
-    es.onmessage = (ev) => {
-      try {
-        const payload = JSON.parse(ev.data);
-        if (!payload?.phase) return;
-
-        if (payload.phase === 'images' || payload.phase === 'image') {
-          scheduleReload();
-        } else if (payload.phase === 'pipeline' && payload.status === 'started') {
-          router.push(`/projects/${project.id}/status`);
-        }
-      } catch {
-        /* ignore */
+    const unsubscribe = subscribeProjectStatus(project.id, (payload: any) => {
+      if (!payload?.phase) return;
+      if (payload.phase === 'images' || payload.phase === 'image') {
+        scheduleReload();
+      } else if (payload.phase === 'pipeline' && payload.status === 'started') {
+        routerRef.current.push(`/projects/${projectIdRef.current}/status`);
       }
-    };
-
-    es.onerror = () => {
-      // Browser auto-reconnects.
-    };
+    });
 
     return () => {
-      es?.close();
+      unsubscribe();
       if (reloadDebounce.current) clearTimeout(reloadDebounce.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id]);
 
-  async function refresh() {
+  async function refreshMusicLibrary() {
     try {
-      const { project: fresh } = await api.getProject(project.id);
-      setProject(fresh);
+      const { tracks: fresh } = await api.listMusic();
+      setMusicTracks(fresh);
     } catch {
       /* ignore */
     }
@@ -94,14 +100,24 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
     project.scenes.every((s) => s.selectedImageId);
   const hasVoice = !!project.voiceId;
   const ready = allSceneImagesPicked && hasVoice;
-  const selectedTrack = tracks.find((t) => t.id === project.musicTrackId);
+  const selectedTrack = musicTracks.find((t) => t.id === project.musicTrackId);
 
   const stillRendering = project.scenes.some(
-    (s) => s.imageVariants.length === 0 && s.status !== 'failed'
+    (s) => s.imageVariants.length === 0 && !isSceneImageGenerationFailed(s)
   );
-  const failedCount = project.scenes.filter((s) => s.status === 'failed').length;
+  const failedCount = project.scenes.filter((s) => isSceneImageGenerationFailed(s)).length;
   const pickedCount = project.scenes.filter((s) => !!s.selectedImageId).length;
   const totalCount = project.scenes.length;
+  const anyMultiShot = project.scenes.some((s) => s.multiShotEnabled);
+  // Show the cinematic-shots hint once the user has picked at least one
+  // image (so they're past the "wait for renders" phase) but only while
+  // the project is still in an image-review state. We hide it once any
+  // scene is already opted in — at that point the user clearly knows
+  // about the step.
+  const showShotsHint =
+    !anyMultiShot &&
+    pickedCount > 0 &&
+    (project.status === 'images-review' || project.status === 'images-ready');
 
   const readyTooltip = useMemo(() => {
     if (!hasVoice) return 'Pick a voice in the sidebar before generating';
@@ -164,6 +180,28 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
           <span className="text-white font-medium">Images are still rendering.</span>
           {' '}You can pick voice, subtitles, and music in the sidebar now —
           they don&rsquo;t block image generation.
+        </div>
+      )}
+
+      {/* Optional cinematic-shots step. Hidden once any scene has
+          multi-shot enabled — at that point the StepNav already guides
+          the user. */}
+      {showShotsHint && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#FF4689]/25 bg-gradient-to-r from-[#FFA846]/10 to-[#FF4689]/10 px-4 py-3 text-sm text-ink-100/90 animate-fade-in">
+          <div className="min-w-0">
+            <span className="font-medium text-white">Want it more cinematic?</span>{' '}
+            By default each scene is one Seedance clip. Optionally turn on
+            multi-shot on the next step to cross-cut between ~
+            {project.multiShotTargetSeconds || 2.5}s shots of the same scene
+            — voiceover stays continuous. Otherwise just hit{' '}
+            <span className="text-white">Generate video</span>.
+          </div>
+          <Link
+            href={`/projects/${project.id}/shots`}
+            className="btn-ghost shrink-0 !px-3 !py-1.5 !text-xs"
+          >
+            Review cinematic shots →
+          </Link>
         </div>
       )}
 
@@ -274,12 +312,13 @@ export function ProjectDetail({ initialProject, voices, tracks }: Props) {
       {musicModalOpen && (
         <MusicLibraryModal
           projectId={project.id}
-          tracks={tracks}
+          tracks={musicTracks}
           onClose={() => setMusicModalOpen(false)}
           onSelected={async () => {
             setMusicModalOpen(false);
             await refresh();
           }}
+          onLibraryChanged={refreshMusicLibrary}
         />
       )}
     </div>

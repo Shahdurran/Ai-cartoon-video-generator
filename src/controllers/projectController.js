@@ -29,6 +29,7 @@ const multer = require('multer');
 const projectRepo = require('../db/repositories/projectRepo');
 const sceneRepo = require('../db/repositories/sceneRepo');
 const sceneImageRepo = require('../db/repositories/sceneImageRepo');
+const shotRepo = require('../db/repositories/shotRepo');
 const styleRepo = require('../db/repositories/styleRepo');
 const musicTrackRepo = require('../db/repositories/musicTrackRepo');
 const hookVariantRepo = require('../db/repositories/hookVariantRepo');
@@ -104,12 +105,26 @@ async function hydrateProjectDetailed(project) {
   const fullScenes = await Promise.all(
     scenes.map(async (scene) => {
       const images = await sceneImageRepo.findByScene(scene.id);
+      const shots = scene.multiShotEnabled
+        ? await shotRepo.findByScene(scene.id)
+        : [];
+      const shotsHydrated = await Promise.all(
+        shots.map(async (shot) => {
+          const variants = await sceneImageRepo.findByShot(shot.id);
+          return {
+            ...shot,
+            imageVariants: await hydrateImageVariants(variants),
+            videoSignedUrl: await urlFor(shot.videoKey),
+          };
+        })
+      );
       return {
         ...scene,
         imageVariants: await hydrateImageVariants(images),
         voiceSignedUrl: await urlFor(scene.voiceKey),
         videoSignedUrl: await urlFor(scene.videoKey),
         productReferenceSignedUrl: await urlFor(scene.productReferenceKey),
+        shots: shotsHydrated,
       };
     })
   );
@@ -189,6 +204,7 @@ async function create(req, res, next) {
       totalDurationSeconds,
       language,
       tone,
+      multiShotTargetSeconds: Number(project.multiShotTargetSeconds) || 2.5,
     });
 
     res.status(201).json({ project });
@@ -228,6 +244,7 @@ async function patch(req, res, next) {
       'voiceId', 'voiceSettings', 'subtitleSettings',
       'imageModelSettings', 'videoModelSettings',
       'musicTrackId', 'musicVolume',
+      'multiShotTargetSeconds',
     ];
     const patchBody = {};
     for (const key of allowed) {
@@ -368,9 +385,10 @@ async function patchScene(req, res, next) {
  * Upload (or replace) the product reference image for a single scene.
  * Stored on R2 at a stable per-scene key so re-uploading overwrites.
  *
- * The reference is consumed by image generation as `image_url` (Higgsfield
- * Soul) or as image-to-image input where supported, so the product appears
- * consistently across regenerations of the scene.
+ * Image generation registers a Higgsfield Soul ID from this file (see
+ * /v1/custom-references) on the first variant job when Higgsfield is the
+ * primary provider, then sends `custom_reference_id` for stronger lock
+ * than `image_url` alone. Replacing the file clears the stored Soul ID.
  */
 async function uploadProductReference(req, res, next) {
   try {
@@ -591,10 +609,25 @@ async function generate(req, res, next) {
     if (scenes.length === 0) {
       return res.status(400).json({ error: 'Project has no scenes yet' });
     }
-    const missing = scenes.filter((s) => !s.selectedImageId);
+    // Validate selected images for both single-shot scenes and (when
+    // any scene opted into multi-shot) every shot of every multi-shot
+    // scene. Multi-shot projects normally go through /shots first; this
+    // is the safety net for users who hit "Generate video" instead.
+    const missing = [];
+    for (const s of scenes) {
+      if (s.multiShotEnabled) {
+        const shots = await shotRepo.findByScene(s.id);
+        if (shots.length === 0 || shots.some((sh) => !sh.selectedImageId)) {
+          missing.push(s);
+        }
+      } else if (!s.selectedImageId) {
+        missing.push(s);
+      }
+    }
     if (missing.length > 0) {
       return res.status(400).json({
-        error: 'All scenes must have a selected image before generating',
+        error:
+          'All scenes (and every shot of multi-shot scenes) must have a selected image before generating',
         missingSceneIndices: missing.map((s) => s.sceneIndex),
       });
     }
@@ -607,7 +640,17 @@ async function generate(req, res, next) {
       if (!scene.voiceKey) {
         await queues.sceneVoice.add('generate', { projectId, sceneId: scene.id });
       }
-      await queues.seedanceVideo.add('submit', { projectId, sceneId: scene.id });
+      if (scene.multiShotEnabled) {
+        const shots = await shotRepo.findByScene(scene.id);
+        for (const shot of shots) {
+          if (shot.videoKey) continue; // skip already-rendered shots
+          await queues.shotVideo.add('submit', {
+            projectId, sceneId: scene.id, shotId: shot.id,
+          });
+        }
+      } else if (!scene.videoKey) {
+        await queues.seedanceVideo.add('submit', { projectId, sceneId: scene.id });
+      }
     }
 
     await pubsub.publish(projectId, { phase: 'pipeline', status: 'started' });
@@ -740,6 +783,7 @@ async function regenerateScript(req, res, next) {
       totalDurationSeconds,
       language,
       tone,
+      multiShotTargetSeconds: Number(project.multiShotTargetSeconds) || 2.5,
     });
 
     res.json({ enqueued: true });
@@ -917,11 +961,21 @@ async function approveVideos(req, res, next) {
     if (scenes.length === 0) {
       return res.status(400).json({ error: 'Project has no scenes' });
     }
-    const missingVideo = scenes.filter((s) => !s.videoKey);
-    if (missingVideo.length > 0) {
+    const missingScenes = [];
+    for (const s of scenes) {
+      if (s.multiShotEnabled) {
+        const shots = await shotRepo.findByScene(s.id);
+        if (shots.length === 0 || shots.some((sh) => !sh.videoKey)) {
+          missingScenes.push(s);
+        }
+      } else if (!s.videoKey) {
+        missingScenes.push(s);
+      }
+    }
+    if (missingScenes.length > 0) {
       return res.status(400).json({
         error: 'All scenes must have a generated video before approving',
-        missingSceneIndices: missingVideo.map((s) => s.sceneIndex),
+        missingSceneIndices: missingScenes.map((s) => s.sceneIndex),
       });
     }
 
@@ -950,12 +1004,508 @@ async function generateHooks(req, res, next) {
       return res.status(400).json({ error: 'Final video must be assembled before generating hooks' });
     }
 
+    // Wipe previous hook attempts -- otherwise failed/old variants pile
+    // up underneath the new ones in the UI. The worker also recreates
+    // its own pending rows when it doesn't find the synthetic ones, so
+    // this is safe even if the request is retried.
+    await hookVariantRepo.deleteByProject(projectId);
+
+    // Pre-create N pending rows synchronously so the UI immediately
+    // shows skeleton cards on the next /api/projects fetch -- without
+    // this, the rows only appear after the worker's Claude call lands
+    // and users have to manually refresh to see anything happening.
+    const placeholders = [];
+    for (let i = 0; i < variantCount; i++) {
+      const row = await hookVariantRepo.create({
+        projectId,
+        variantIndex: i,
+        hookScript: '',
+        hookDurationSeconds,
+      });
+      placeholders.push(row);
+    }
+
     const job = await queues.hookGenerator.add('generate', {
       projectId,
       hookDurationSeconds,
       variantCount,
+      placeholderIds: placeholders.map((p) => p.id),
     });
-    res.json({ enqueued: true, jobId: job.id, hookDurationSeconds, variantCount });
+    res.json({
+      enqueued: true,
+      jobId: job.id,
+      hookDurationSeconds,
+      variantCount,
+      hookVariants: placeholders,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/projects/:id/hooks/:hookId/retry
+ * POST /api/projects/:id/hooks/retry   body: { hookId }
+ *
+ * Re-run a single hook variant using its existing script (no Claude
+ * call). Used by the per-card "Retry" button so users don't have to
+ * regenerate every variant just because one of them failed.
+ *
+ * The body-only `/hooks/retry` variant exists because some reverse proxies
+ * mishandle long nested paths with multiple UUID segments.
+ */
+async function retryHookVariant(req, res, next) {
+  try {
+    const { id: projectId } = req.params;
+    const hookId = req.params.hookId || req.body?.hookId;
+    if (!hookId) {
+      return res.status(400).json({ error: 'hookId required (URL param or JSON body)' });
+    }
+
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    if (!project.outputKey) {
+      return res.status(400).json({ error: 'Final video must be assembled before retrying hooks' });
+    }
+
+    const existing = await hookVariantRepo.findById(hookId);
+    if (!existing || existing.projectId !== projectId) {
+      return res.status(404).json({ error: 'Hook variant not found' });
+    }
+
+    const reset = await hookVariantRepo.update(hookId, {
+      status: 'pending',
+      errorMessage: null,
+    });
+
+    const job = await queues.hookGenerator.add('retry', {
+      projectId,
+      retryIds: [hookId],
+      hookDurationSeconds: existing.hookDurationSeconds,
+    });
+
+    res.json({ enqueued: true, jobId: job.id, hookVariant: reset || existing });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * DELETE /api/projects/:id/hooks/failed
+ *
+ * Removes every hook_variant row for the project that is in 'failed'
+ * status. Used by the "Clear failed" button to tidy up the variant
+ * grid without wiping successful renders.
+ */
+async function clearFailedHookVariants(req, res, next) {
+  try {
+    const { id: projectId } = req.params;
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const removed = await hookVariantRepo.deleteFailedByProject(projectId);
+    res.json({ removed });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ------- multi-shot handlers ----------------------------------------------
+
+/**
+ * Toggle multi-shot for a single scene.
+ *   PATCH /projects/:id/scenes/:sceneId/multi-shot   { enabled: boolean }
+ *
+ * On enable: bootstrap scene_shots from scenes.suggested_shots (or fall
+ *            back to a 2-shot template if Claude didn't supply any).
+ * On disable: delete all scene_shots for the scene (FK cascade also
+ *            removes any per-shot scene_images rows).
+ *
+ * Allowed in any state up to (but not including) shot-images-pending /
+ * generating / assembling / complete -- the user toggles multi-shot on
+ * the dedicated shots-review page before kicking off shot rendering.
+ */
+async function setMultiShot(req, res, next) {
+  try {
+    const { id: projectId, sceneId } = req.params;
+    const { enabled } = req.body || {};
+
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const scene = await sceneRepo.findById(sceneId);
+    if (!scene || scene.projectId !== projectId) {
+      return res.status(404).json({ error: 'Scene not found' });
+    }
+
+    const lockedStates = new Set([
+      'shot-images-pending',
+      'generating',
+      'assembling',
+      'complete',
+    ]);
+    if (lockedStates.has(project.status)) {
+      return res.status(409).json({
+        error: `Cannot change multi-shot once project status is '${project.status}'`,
+      });
+    }
+
+    const wantOn = !!enabled;
+    if (wantOn) {
+      const seed =
+        Array.isArray(scene.suggestedShots) && scene.suggestedShots.length >= 2
+          ? scene.suggestedShots
+          : [
+              { role: 'wide', imagePrompt: `${scene.imagePrompt}. Wide establishing shot.` },
+              { role: 'closeup', imagePrompt: `${scene.imagePrompt}. Tight close-up on the main subject.` },
+            ];
+      const targetSecs = Number(project.multiShotTargetSeconds) || 2.5;
+      const existing = await shotRepo.findByScene(sceneId);
+      // Only seed when the scene has no shots yet -- toggling on/off/on
+      // should not silently wipe a shot list the user has already edited.
+      if (existing.length === 0) {
+        await shotRepo.bulkReplace(
+          sceneId,
+          seed.map((s) => ({ ...s, durationSeconds: targetSecs }))
+        );
+      }
+    } else {
+      await shotRepo.deleteByScene(sceneId);
+    }
+
+    const updated = await sceneRepo.setMultiShotEnabled(sceneId, wantOn);
+    const shots = wantOn ? await shotRepo.findByScene(sceneId) : [];
+    res.json({ scene: { ...updated, shots } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Bulk replace the shot list for one scene.
+ *   PUT /projects/:id/scenes/:sceneId/shots   { shots: [{ role, imagePrompt, durationSeconds? }] }
+ *
+ * Re-numbers shot_index from 0. Deletes every existing shot (and its
+ * images/video via FK cascade), so callers should only invoke this from
+ * the shots-review page, before per-shot image jobs have been queued.
+ */
+async function replaceShots(req, res, next) {
+  try {
+    const { id: projectId, sceneId } = req.params;
+    const { shots } = req.body || {};
+
+    if (!Array.isArray(shots) || shots.length === 0) {
+      return res.status(400).json({ error: 'shots[] must contain at least 1 shot' });
+    }
+    if (shots.length > 6) {
+      return res.status(400).json({ error: 'shots[] is capped at 6 per scene' });
+    }
+
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const scene = await sceneRepo.findById(sceneId);
+    if (!scene || scene.projectId !== projectId) {
+      return res.status(404).json({ error: 'Scene not found' });
+    }
+
+    const editableStates = new Set([
+      'images-review',
+      'images-ready',
+      'shots-review',
+      'shot-images-review',
+      'videos-review',
+    ]);
+    if (!editableStates.has(project.status)) {
+      return res.status(409).json({
+        error: `Cannot edit shots once project status is '${project.status}'`,
+      });
+    }
+
+    const targetSecs = Number(project.multiShotTargetSeconds) || 2.5;
+    const normalised = shots.map((s) => ({
+      role: String(s.role || 'wide'),
+      imagePrompt: String(s.imagePrompt || '').trim(),
+      durationSeconds: Number(s.durationSeconds) || targetSecs,
+    }));
+    for (let i = 0; i < normalised.length; i++) {
+      if (!normalised[i].imagePrompt) {
+        return res.status(400).json({ error: `Shot ${i + 1}: imagePrompt is required` });
+      }
+    }
+
+    const inserted = await shotRepo.bulkReplace(sceneId, normalised);
+    if (!scene.multiShotEnabled) {
+      await sceneRepo.setMultiShotEnabled(sceneId, true);
+    }
+    res.json({ shots: inserted });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Approve the shot list for the project. For every multi-shot scene whose
+ * shots don't yet have variants, enqueue per-shot image jobs. Single-shot
+ * scenes are untouched -- they keep their existing scene_images/Seedance.
+ *
+ *   POST /projects/:id/approve-shots   { variantCount?: number, force?: boolean }
+ *
+ * Idempotent: if the user re-approves with no edits and existing variants
+ * cover the current prompts, we no-op (mirrors approveScript dedupe).
+ */
+async function approveShots(req, res, next) {
+  try {
+    const { id: projectId } = req.params;
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    // We permit approving shots even after the project has reached
+    // 'videos-review' or 'failed', because the user may toggle a scene
+    // into multi-shot AFTER seedance has already produced the single-
+    // shot renders, then expect to render per-shot videos for that
+    // scene. The terminal pipeline states (assembling/complete) are
+    // still locked.
+    const validFromStates = new Set([
+      'images-review',
+      'images-ready',
+      'shots-review',
+      'shot-images-pending',
+      'shot-images-review',
+      'videos-review',
+      'generating',
+      'failed',
+    ]);
+    if (!validFromStates.has(project.status)) {
+      return res.status(409).json({
+        error: `Cannot approve shots when project status is '${project.status}'`,
+      });
+    }
+
+    const variantCount = Math.min(
+      Math.max(parseInt(req.body?.variantCount, 10) || 3, 1),
+      6
+    );
+    const force = req.body?.force === true;
+
+    const scenes = await sceneRepo.findByProject(projectId);
+    const multiScenes = scenes.filter((s) => s.multiShotEnabled);
+    if (multiScenes.length === 0) {
+      // Nothing to do -- pretend approval moves us straight to the videos step.
+      return res.json({ enqueued: false, enqueuedCount: 0, sceneCount: 0 });
+    }
+
+    // We only enqueue (re-)generation when we actually have to:
+    //   - The shot has no variants yet (first run).
+    //   - The caller passed `force: true` (explicit "regenerate all").
+    //
+    // We do NOT try to auto-detect prompt drift here. The composed
+    // promptUsed bakes in style + character anchors that legitimately
+    // change between approve calls, and a heuristic comparison would
+    // wipe the user's currently-selected variant + queue an expensive
+    // regeneration just because the user clicked "Generate shot images"
+    // a second time. If the user wants to re-roll, they can hit
+    // "Regenerate" per-shot (which sets force on that one shot) or pass
+    // `force: true` on this endpoint.
+    let enqueuedCount = 0;
+    for (const scene of multiScenes) {
+      const shots = await shotRepo.findByScene(scene.id);
+      for (const shot of shots) {
+        const variants = await sceneImageRepo.findByShot(shot.id);
+        if (force || variants.length === 0) {
+          await queues.shotImages.add('generate-variants', {
+            projectId,
+            sceneId: scene.id,
+            shotId: shot.id,
+            variantCount,
+            clearExisting: variants.length > 0,
+          });
+          enqueuedCount += 1;
+        }
+      }
+    }
+
+    if (enqueuedCount > 0) {
+      await projectRepo.updateStatus(projectId, 'shot-images-pending');
+      await pubsub.publish(projectId, {
+        phase: 'shot-images',
+        status: 'started',
+        shotCount: enqueuedCount,
+      });
+    }
+
+    res.json({
+      enqueued: enqueuedCount > 0,
+      enqueuedCount,
+      sceneCount: multiScenes.length,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Pick a variant for one shot.
+ *   PATCH /projects/:id/scenes/:sceneId/shots/:shotId/select-image
+ *     { sceneImageId }
+ */
+async function selectShotImage(req, res, next) {
+  try {
+    const { id: projectId, sceneId, shotId } = req.params;
+    const { sceneImageId } = req.body;
+    if (!sceneImageId) return res.status(400).json({ error: 'sceneImageId required' });
+
+    const img = await sceneImageRepo.findById(sceneImageId);
+    if (!img || img.shotId !== shotId) {
+      return res.status(404).json({ error: 'Image not found for this shot' });
+    }
+    const shot = await shotRepo.updateSelectedImage(shotId, sceneImageId);
+    res.json({ shot });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Regenerate variants for one shot (with optional new prompt).
+ *   POST /projects/:id/scenes/:sceneId/shots/:shotId/regenerate-image
+ *     { prompt?, variantCount? }
+ */
+async function regenerateShotImage(req, res, next) {
+  try {
+    const { id: projectId, sceneId, shotId } = req.params;
+    const { prompt, variantCount = 3 } = req.body || {};
+
+    const shot = await shotRepo.findById(shotId);
+    if (!shot || shot.sceneId !== sceneId) {
+      return res.status(404).json({ error: 'Shot not found' });
+    }
+
+    if (typeof prompt === 'string' && prompt.trim() && prompt.trim() !== shot.imagePrompt) {
+      await shotRepo.patchFields(shotId, { imagePrompt: prompt.trim() });
+    }
+
+    const job = await queues.shotImages.add('generate-variants', {
+      projectId,
+      sceneId,
+      shotId,
+      variantCount,
+      clearExisting: true,
+      customPrompt: prompt || null,
+    });
+
+    res.json({ enqueued: true, jobId: job.id });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Approve the per-shot variants and kick off Seedance for every shot
+ * (and any single-shot scenes that don't yet have video).
+ *   POST /projects/:id/approve-shot-images
+ */
+async function approveShotImages(req, res, next) {
+  try {
+    const { id: projectId } = req.params;
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const validFromStates = new Set([
+      'shot-images-review',
+      'shot-images-pending',
+      'images-review',
+      'images-ready',
+      'generating',
+      'videos-review',
+      'failed',
+    ]);
+    if (!validFromStates.has(project.status)) {
+      return res.status(409).json({
+        error: `Cannot approve shot images when project status is '${project.status}'`,
+      });
+    }
+
+    const scenes = await sceneRepo.findByProject(projectId);
+    if (scenes.length === 0) {
+      return res.status(400).json({ error: 'Project has no scenes' });
+    }
+
+    // Validate every multi-shot scene has every shot picked.
+    for (const scene of scenes) {
+      if (!scene.multiShotEnabled) continue;
+      const shots = await shotRepo.findByScene(scene.id);
+      if (shots.length === 0) {
+        return res.status(400).json({
+          error: `Scene ${scene.sceneIndex + 1} is multi-shot but has no shots configured`,
+        });
+      }
+      for (const shot of shots) {
+        if (!shot.selectedImageId) {
+          return res.status(400).json({
+            error: `Scene ${scene.sceneIndex + 1} shot ${shot.shotIndex + 1} has no selected image`,
+          });
+        }
+      }
+    }
+
+    // Enforce single-shot scenes still have their scene-level image picked.
+    const missingSingle = scenes.filter((s) => !s.multiShotEnabled && !s.selectedImageId);
+    if (missingSingle.length > 0) {
+      return res.status(400).json({
+        error: 'All single-shot scenes must have a selected image before generating',
+        missingSceneIndices: missingSingle.map((s) => s.sceneIndex),
+      });
+    }
+
+    await projectRepo.updateStatus(projectId, 'generating');
+
+    for (const scene of scenes) {
+      // Voiceover for any scene that doesn't have one (parallel with video).
+      if (!scene.voiceKey) {
+        await queues.sceneVoice.add('generate', { projectId, sceneId: scene.id });
+      }
+      if (scene.multiShotEnabled) {
+        const shots = await shotRepo.findByScene(scene.id);
+        for (const shot of shots) {
+          // Skip shots that already rendered successfully (re-approval).
+          if (shot.videoKey) continue;
+          await queues.shotVideo.add('submit', {
+            projectId,
+            sceneId: scene.id,
+            shotId: shot.id,
+          });
+        }
+      } else if (!scene.videoKey) {
+        await queues.seedanceVideo.add('submit', { projectId, sceneId: scene.id });
+      }
+    }
+
+    await pubsub.publish(projectId, { phase: 'pipeline', status: 'started' });
+    res.json({ enqueued: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Re-run Seedance for ONE shot.
+ *   POST /projects/:id/scenes/:sceneId/shots/:shotId/regenerate-video
+ */
+async function regenerateShotVideo(req, res, next) {
+  try {
+    const { id: projectId, sceneId, shotId } = req.params;
+    const shot = await shotRepo.findById(shotId);
+    if (!shot || shot.sceneId !== sceneId) {
+      return res.status(404).json({ error: 'Shot not found' });
+    }
+    if (!shot.selectedImageId) {
+      return res.status(400).json({ error: 'Shot has no selected image' });
+    }
+    await shotRepo.updateStatus(shotId, 'image-ready', null, null);
+    const job = await queues.shotVideo.add('submit', { projectId, sceneId, shotId });
+    await pubsub.publish(projectId, { sceneId, shotId, phase: 'shot-video', status: 'requeued' });
+    res.json({ enqueued: true, jobId: job.id });
   } catch (err) {
     next(err);
   }
@@ -969,30 +1519,52 @@ async function statusStream(req, res, next) {
 
     res.set({
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
     res.flushHeaders?.();
+
+    // Disable socket inactivity timeouts on this long-lived response.
+    if (req.socket && typeof req.socket.setTimeout === 'function') {
+      req.socket.setTimeout(0);
+    }
+    if (req.socket && typeof req.socket.setNoDelay === 'function') {
+      req.socket.setNoDelay(true);
+    }
+    if (req.socket && typeof req.socket.setKeepAlive === 'function') {
+      req.socket.setKeepAlive(true, 30_000);
+    }
 
     // Initial snapshot so the client doesn't sit empty.
     res.write(`event: snapshot\ndata: ${JSON.stringify({
       projectId, status: project.status, topic: project.topic,
     })}\n\n`);
 
+    // Hint browsers to wait at least 15s before reconnecting on disconnect.
+    res.write('retry: 15000\n\n');
+
     const unsubscribe = await pubsub.subscribe(projectId, (event) => {
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
+      try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch (_) { /* ignore */ }
     });
 
-    // Heartbeat so intermediate proxies don't close the stream.
+    // Heartbeat at 15s — short enough to keep DevServer/HMR/proxies happy
+    // and to detect a dead client quickly.
     const heartbeat = setInterval(() => {
-      res.write(':\n\n');
-    }, 30_000);
+      try { res.write(`: ping ${Date.now()}\n\n`); } catch (_) { /* ignore */ }
+    }, 15_000);
 
-    req.on('close', async () => {
+    let closed = false;
+    const cleanup = async () => {
+      if (closed) return;
+      closed = true;
       clearInterval(heartbeat);
-      await unsubscribe();
-    });
+      try { await unsubscribe(); } catch (_) { /* ignore */ }
+    };
+    req.on('close', cleanup);
+    req.on('aborted', cleanup);
+    res.on('close', cleanup);
+    res.on('error', cleanup);
   } catch (err) {
     next(err);
   }
@@ -1008,8 +1580,16 @@ module.exports = {
   regenerateSceneVideo,
   regenerateSubtitles,
   approveVideos,
-  generate, generateHooks,
+  generate, generateHooks, retryHookVariant, clearFailedHookVariants,
   statusStream,
+  // Multi-shot handlers
+  setMultiShot,
+  replaceShots,
+  approveShots,
+  selectShotImage,
+  regenerateShotImage,
+  approveShotImages,
+  regenerateShotVideo,
   upload: memoryUpload,
   fontUpload,
 };

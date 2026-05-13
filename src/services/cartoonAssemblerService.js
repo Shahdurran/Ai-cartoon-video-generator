@@ -24,6 +24,17 @@ function escapeFontToken(name) {
   return String(name || 'Arial').replace(/'/g, "\\'");
 }
 
+/**
+ * FFmpeg passed through fluent-ffmpeg on Windows sometimes fails with
+ * "Error opening output file … Invalid argument" when paths contain only
+ * backslashes. Using an absolute path with forward slashes matches how we
+ * escape paths inside filter graphs (see escapeFilterPath) and avoids that
+ * libavformat quirk for plain -i / output arguments too.
+ */
+function toFfmpegIoPath(filePath) {
+  return path.resolve(filePath).replace(/\\/g, '/');
+}
+
 function httpGet(url, { redirects = 5, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, { headers }, (res) => {
@@ -209,6 +220,164 @@ async function downloadScenes(projectId, sceneVideoKeys, tmpDir) {
     out.push(local);
   }
   return out;
+}
+
+/**
+ * Download every shot of every multi-shot scene into the temp dir.
+ * Returns a parallel array (same length / order as `scenePlans`); for
+ * single-shot scenes the value is `null` (caller falls back to the
+ * scene-level video key).
+ */
+async function downloadMultiShotInputs(scenePlans, tmpDir) {
+  const out = [];
+  for (let i = 0; i < scenePlans.length; i++) {
+    const plan = scenePlans[i];
+    if (!plan?.shots?.length) {
+      out.push(null);
+      continue;
+    }
+    const shotPaths = [];
+    for (let j = 0; j < plan.shots.length; j++) {
+      const shot = plan.shots[j];
+      const local = path.join(
+        tmpDir,
+        `scene-${String(i).padStart(3, '0')}-shot-${String(j).padStart(2, '0')}-raw.mp4`
+      );
+      if (r2Service.isConfigured()) {
+        await r2Service.downloadToFile(shot.videoKey, local);
+      } else {
+        await fs.copy(shot.videoKey, local);
+      }
+      shotPaths.push({ ...shot, localPath: local });
+    }
+    out.push(shotPaths);
+  }
+  return out;
+}
+
+/**
+ * Multi-shot bake: trim each shot to its allocated window so the cuts
+ * land at the right beats, hard-cut concatenate them, then mux the
+ * scene's voiceover MP3 across the whole concatenated visual as a
+ * single continuous audio track. The result is one per-scene MP4 that
+ * the rest of the assembler treats exactly like a single-shot scene.
+ *
+ * Window allocation: equal split of the voice duration across N shots,
+ * with the last shot absorbing any rounding drift. For v1 we don't snap
+ * to word boundaries -- the audio is one continuous take, so cut points
+ * only need to feel rhythmic, not align with phonemes.
+ */
+async function bakeMultiShotScene(shotInputs, voicePath, sceneIndex, outPath, tmpDir) {
+  if (!Array.isArray(shotInputs) || shotInputs.length === 0) {
+    throw new Error(`bakeMultiShotScene: no shots for scene ${sceneIndex}`);
+  }
+
+  // Determine total duration the visual must cover. With voice we use the
+  // voice mp3's duration so narration syncs exactly. Without voice we sum
+  // the shots' target durations.
+  let totalDur = null;
+  if (voicePath) {
+    totalDur = await probeDurationSeconds(voicePath);
+  }
+  if (!totalDur || totalDur <= 0) {
+    totalDur = shotInputs.reduce(
+      (sum, s) => sum + (Number(s.durationSeconds) || 2.5),
+      0
+    );
+  }
+
+  // Equal split -- last shot absorbs any drift so total exactly matches
+  // totalDur. (Equal split is good enough for v1 because the audio is one
+  // continuous take; cut points just need to feel rhythmic.)
+  const n = shotInputs.length;
+  const baseWindow = totalDur / n;
+  const windows = shotInputs.map((_, i) =>
+    i === n - 1 ? Math.max(0.5, totalDur - baseWindow * (n - 1)) : baseWindow
+  );
+
+  // Trim each shot clip to its window, padding with the last frame if the
+  // Seedance render came back short. Also strip any Seedance audio --
+  // the scene voiceover replaces it across the cuts.
+  const trimmed = [];
+  for (let i = 0; i < n; i++) {
+    const shot = shotInputs[i];
+    const winSecs = windows[i];
+    const clipDur = await probeDurationSeconds(shot.localPath);
+    const needsPad = clipDur && clipDur < winSecs - 0.05;
+
+    const out = path.join(
+      tmpDir,
+      `scene-${String(sceneIndex).padStart(3, '0')}-shot-${String(i).padStart(2, '0')}-trim.mp4`
+    );
+
+    await runFfmpeg(`shot-trim-s${sceneIndex}-${i}`, (cmd) => {
+      cmd.input(shot.localPath);
+      const vFilters = [];
+      if (needsPad) {
+        const padSecs = (winSecs - clipDur).toFixed(3);
+        vFilters.push(`tpad=stop_mode=clone:stop_duration=${padSecs}`);
+      }
+      vFilters.push('setpts=PTS-STARTPTS');
+      cmd.complexFilter([`[0:v]${vFilters.join(',')}[v]`]);
+      cmd.outputOptions([
+        '-map', '[v]',
+        '-an',
+        '-t', winSecs.toFixed(3),
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '20',
+        '-pix_fmt', 'yuv420p',
+      ]);
+      cmd.output(out);
+    });
+    trimmed.push(out);
+  }
+
+  // Concat the trimmed (audio-stripped) shots. Hard cuts only -- no
+  // crossfade (per the user's choice), so the concat demuxer with
+  // re-encode is the simplest path that handles mixed encoders.
+  const concatVisual = path.join(
+    tmpDir,
+    `scene-${String(sceneIndex).padStart(3, '0')}-visual.mp4`
+  );
+  await runFfmpeg(`shot-concat-s${sceneIndex}`, (cmd) => {
+    trimmed.forEach((p) => cmd.input(p));
+    const filter =
+      trimmed.map((_, i) => `[${i}:v:0]`).join('') +
+      `concat=n=${trimmed.length}:v=1:a=0[v]`;
+    cmd.complexFilter(filter);
+    cmd.outputOptions([
+      '-map', '[v]',
+      '-an',
+      '-c:v', 'libx264',
+      '-preset', 'fast',
+      '-crf', '20',
+      '-pix_fmt', 'yuv420p',
+    ]);
+    cmd.output(concatVisual);
+  });
+
+  // Mux the voice mp3 across the concatenated visual. Without voice we
+  // just copy the visual and let the downstream concat synthesise silent
+  // audio so all scenes have matching audio streams.
+  if (voicePath) {
+    await runFfmpeg(`shot-mux-s${sceneIndex}`, (cmd) => {
+      cmd.input(concatVisual).input(voicePath);
+      cmd.outputOptions([
+        '-map', '0:v:0',
+        '-map', '1:a:0',
+        '-t', totalDur.toFixed(3),
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+      ]);
+      cmd.output(outPath);
+    });
+  } else {
+    await fs.copy(concatVisual, outPath);
+  }
+
+  return outPath;
 }
 
 /**
@@ -470,6 +639,12 @@ async function assembleFinalVideo(input) {
     projectId,
     sceneVideoKeys,
     sceneVoiceKeys = [],
+    // Optional, parallel to sceneVideoKeys. When a scene's plan has
+    // `shots: [{ videoKey, durationSeconds }]` the assembler renders a
+    // multi-shot bake (hard cuts between shots, voice across the cuts)
+    // instead of using the single sceneVideoKey. Single-shot scenes keep
+    // working with no plan supplied.
+    scenePlans = null,
     subtitlesKey,
     musicKey,
     musicVolume = 0.15,
@@ -495,15 +670,21 @@ async function assembleFinalVideo(input) {
     const voicePaths = await downloadSceneVoices(sceneVoiceKeys, tmpDir);
     const srtPath = await downloadSrt(subtitlesKey, tmpDir);
     const musicPath = await downloadMusic(musicKey, tmpDir);
+    const multiShotInputs = await downloadMultiShotInputs(scenePlans, tmpDir);
 
-    // Replace each Seedance clip's audio with the matching voiceover and
-    // pad/trim the visual to the voice duration. This is what actually
-    // gets the narration into the final video — the previous pipeline
-    // dropped voiceKey on the floor and only mixed background music.
+    // For each scene: either bake a multi-shot scene (hard cuts between
+    // shot videos with voice across the cuts) OR run the legacy
+    // bake-voice-into-single-clip path. Both produce a per-scene MP4
+    // that the downstream concat treats identically.
     const clipPaths = [];
     for (let i = 0; i < rawClipPaths.length; i++) {
       const baked = path.join(tmpDir, `scene-${String(i).padStart(3, '0')}-vo.mp4`);
-      await bakeVoiceIntoClip(rawClipPaths[i], voicePaths[i] || null, baked);
+      const shots = multiShotInputs[i];
+      if (shots && shots.length > 0) {
+        await bakeMultiShotScene(shots, voicePaths[i] || null, i, baked, tmpDir);
+      } else {
+        await bakeVoiceIntoClip(rawClipPaths[i], voicePaths[i] || null, baked);
+      }
       clipPaths.push(baked);
     }
 
@@ -549,7 +730,7 @@ async function assembleFinalVideo(input) {
             `concat=n=${clipPaths.length}:v=1:a=1[v][a]`;
         }
         cmd
-          .complexFilter(filters, ['v', 'a'])
+          .complexFilter(filters)
           .outputOptions([
             '-map', '[v]',
             '-map', '[a]',
@@ -652,11 +833,14 @@ async function assembleFinalVideo(input) {
  * @returns {Promise<string>} path to trimmed file
  */
 async function trimLeading(inputPath, seconds, outPath) {
+  await fs.ensureDir(path.dirname(path.resolve(outPath)));
+  const inP = toFfmpegIoPath(inputPath);
+  const outP = toFfmpegIoPath(outPath);
   await new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
+    ffmpeg(inP)
       .inputOptions(['-ss', String(seconds)])
-      .outputOptions(['-c', 'copy'])
-      .output(outPath)
+      .outputOptions(['-c', 'copy', '-y'])
+      .output(outP)
       .on('end', resolve)
       .on('error', reject)
       .run();
@@ -666,16 +850,61 @@ async function trimLeading(inputPath, seconds, outPath) {
 
 /**
  * Utility: concat hook clip + tail.
+ *
+ * The concat filter requires every input to have the same stream layout
+ * (video + audio in our case). If either source is missing audio --
+ * commonly the tail when the original final video was assembled with no
+ * voice (FFmpeg emits `-an`) -- referencing `[1:a]` causes
+ * "Error opening output files: Invalid argument" with no useful message.
+ * We probe both inputs and synthesise a silent audio track for any input
+ * that lacks one so the concat always succeeds.
  */
 async function spliceHook(hookPath, tailPath, outPath) {
+  await fs.ensureDir(path.dirname(path.resolve(outPath)));
+  const hookP = toFfmpegIoPath(hookPath);
+  const tailP = toFfmpegIoPath(tailPath);
+  const outP = toFfmpegIoPath(outPath);
+
+  const [hookHasAudio, tailHasAudio, hookDur, tailDur] = await Promise.all([
+    hasAudioStream(hookPath),
+    hasAudioStream(tailPath),
+    probeDurationSeconds(hookPath),
+    probeDurationSeconds(tailPath),
+  ]);
+
   await new Promise((resolve, reject) => {
-    ffmpeg()
-      .input(hookPath)
-      .input(tailPath)
-      .complexFilter(
-        '[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]',
-        ['v', 'a']
-      )
+    const cmd = ffmpeg().input(hookP).input(tailP);
+
+    // Synthesise silent audio inside the filter graph for any input
+    // missing it (avoids fluent-ffmpeg's lavfi-input validation). The
+    // synthesised stream's duration matches the video so concat aligns.
+    const filterParts = [];
+    let hookAudioLabel = '0:a';
+    let tailAudioLabel = '1:a';
+
+    if (!hookHasAudio) {
+      const d = Math.max(0.1, Number(hookDur) || 60);
+      filterParts.push(`aevalsrc=0:c=stereo:s=44100:d=${d.toFixed(3)}[ahook]`);
+      hookAudioLabel = 'ahook';
+    }
+    if (!tailHasAudio) {
+      const d = Math.max(0.1, Number(tailDur) || 60);
+      filterParts.push(`aevalsrc=0:c=stereo:s=44100:d=${d.toFixed(3)}[atail]`);
+      tailAudioLabel = 'atail';
+    }
+    filterParts.push(
+      `[0:v][${hookAudioLabel}][1:v][${tailAudioLabel}]concat=n=2:v=1:a=1[v][a]`
+    );
+
+    // NOTE: do NOT pass the maps array (2nd arg of complexFilter) when
+    // we also include explicit `-map [v] -map [a]` in outputOptions --
+    // fluent-ffmpeg appends them and ffmpeg sees the labels twice,
+    // producing the cryptic
+    //   "Output with label 'v' does not exist ... or was already used"
+    //   "Error opening output files: Invalid argument"
+    // failure that previously broke every hook variant.
+    cmd
+      .complexFilter(filterParts)
       .outputOptions([
         '-map', '[v]',
         '-map', '[a]',
@@ -685,10 +914,15 @@ async function spliceHook(hookPath, tailPath, outPath) {
         '-c:a', 'aac',
         '-b:a', '192k',
         '-movflags', '+faststart',
+        '-y',
       ])
-      .output(outPath)
+      .output(outP)
+      .on('start', (cli) => console.log(`▶️  [splice-hook] ${cli}`))
       .on('end', resolve)
-      .on('error', reject)
+      .on('error', (err, stdout, stderr) => {
+        const tail = String(stderr || '').split(/\r?\n/).slice(-15).join('\n');
+        reject(new Error(`${err.message}\nstderr tail:\n${tail}`));
+      })
       .run();
   });
   return outPath;
@@ -706,4 +940,5 @@ module.exports = {
   trimLeading,
   spliceHook,
   cleanupTmpDir,
+  toFfmpegIoPath,
 };

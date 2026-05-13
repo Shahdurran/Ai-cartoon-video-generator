@@ -15,6 +15,7 @@ const SELECT_COLUMNS = `
   image_model_settings AS "imageModelSettings",
   video_model_settings AS "videoModelSettings",
   music_track_id AS "musicTrackId", music_volume AS "musicVolume",
+  multi_shot_target_seconds AS "multiShotTargetSeconds",
   subtitles_key AS "subtitlesKey", output_key AS "outputKey",
   error_message AS "errorMessage",
   created_at AS "createdAt", updated_at AS "updatedAt"
@@ -154,6 +155,7 @@ async function update(id, patch) {
     videoModelSettings: 'video_model_settings',
     musicTrackId: 'music_track_id',
     musicVolume: 'music_volume',
+    multiShotTargetSeconds: 'multi_shot_target_seconds',
     subtitlesKey: 'subtitles_key',
     outputKey: 'output_key',
     errorMessage: 'error_message',

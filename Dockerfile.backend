@@ -22,8 +22,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+# CLEAR_BULL_QUEUES_ON_START: drain Redis Bull queues on every container boot
+# so stale jobs from a previous deploy are not replayed (override with false if needed).
 ENV NODE_ENV=production \
-    PORT=3000
+    PORT=4000 \
+    CLEAR_BULL_QUEUES_ON_START=true
 
 # Copy dependencies first for caching, then source.
 COPY --from=deps /app/node_modules ./node_modules
@@ -38,7 +41,7 @@ COPY storage ./storage
 # pipeline; mkdir so legacy code that assumes the dir exists doesn't crash.
 RUN mkdir -p ./effects
 
-EXPOSE 3000
+EXPOSE 4000
 
 # tini handles PID 1 signals cleanly (graceful Bull shutdowns).
 ENTRYPOINT ["/usr/bin/tini", "--"]

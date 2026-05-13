@@ -12,6 +12,9 @@ const SELECT_COLUMNS = `
   voice_key AS "voiceKey", video_key AS "videoKey",
   fal_request_id AS "falRequestId",
   product_reference_key AS "productReferenceKey",
+  product_custom_reference_id AS "productCustomReferenceId",
+  multi_shot_enabled AS "multiShotEnabled",
+  suggested_shots AS "suggestedShots",
   status, error_message AS "errorMessage", error_code AS "errorCode",
   created_at AS "createdAt"
 `;
@@ -22,15 +25,23 @@ async function bulkCreate(projectId, scenes) {
     for (const s of scenes) {
       const { rows } = await client.query(
         `INSERT INTO scenes
-           (project_id, scene_index, image_prompt, voiceover_text, duration_seconds)
-         VALUES ($1, $2, $3, $4, $5)
+           (project_id, scene_index, image_prompt, voiceover_text, duration_seconds, suggested_shots)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)
          ON CONFLICT (project_id, scene_index)
          DO UPDATE SET
            image_prompt = EXCLUDED.image_prompt,
            voiceover_text = EXCLUDED.voiceover_text,
-           duration_seconds = EXCLUDED.duration_seconds
+           duration_seconds = EXCLUDED.duration_seconds,
+           suggested_shots = EXCLUDED.suggested_shots
          RETURNING ${SELECT_COLUMNS}`,
-        [projectId, s.sceneIndex, s.imagePrompt, s.voiceoverText, s.durationSeconds]
+        [
+          projectId,
+          s.sceneIndex,
+          s.imagePrompt,
+          s.voiceoverText,
+          s.durationSeconds,
+          s.suggestedShots ? JSON.stringify(s.suggestedShots) : null,
+        ]
       );
       inserted.push(rows[0]);
     }
@@ -61,10 +72,17 @@ async function bulkReplace(projectId, scenes) {
       const s = scenes[i];
       const { rows } = await client.query(
         `INSERT INTO scenes
-           (project_id, scene_index, image_prompt, voiceover_text, duration_seconds)
-         VALUES ($1, $2, $3, $4, $5)
+           (project_id, scene_index, image_prompt, voiceover_text, duration_seconds, suggested_shots)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)
          RETURNING ${SELECT_COLUMNS}`,
-        [projectId, i, s.imagePrompt, s.voiceoverText, s.durationSeconds]
+        [
+          projectId,
+          i,
+          s.imagePrompt,
+          s.voiceoverText,
+          s.durationSeconds,
+          s.suggestedShots ? JSON.stringify(s.suggestedShots) : null,
+        ]
       );
       inserted.push(rows[0]);
     }
@@ -167,6 +185,7 @@ async function patchFields(sceneId, fields) {
   if (fields.productReferenceKey !== undefined) {
     sets.push(`product_reference_key = $${i++}`);
     args.push(fields.productReferenceKey || null);
+    sets.push('product_custom_reference_id = NULL');
   }
 
   if (sets.length === 0) return findById(sceneId);
@@ -182,10 +201,30 @@ async function patchFields(sceneId, fields) {
 
 async function setProductReferenceKey(sceneId, key) {
   const { rows } = await query(
-    `UPDATE scenes SET product_reference_key = $2
+    `UPDATE scenes SET product_reference_key = $2, product_custom_reference_id = NULL
      WHERE id = $1
      RETURNING ${SELECT_COLUMNS}`,
     [sceneId, key || null]
+  );
+  return rows[0] || null;
+}
+
+async function setProductCustomReferenceId(sceneId, customRefId) {
+  const { rows } = await query(
+    `UPDATE scenes SET product_custom_reference_id = $2
+     WHERE id = $1
+     RETURNING ${SELECT_COLUMNS}`,
+    [sceneId, customRefId || null]
+  );
+  return rows[0] || null;
+}
+
+async function setMultiShotEnabled(sceneId, enabled) {
+  const { rows } = await query(
+    `UPDATE scenes SET multi_shot_enabled = $2
+     WHERE id = $1
+     RETURNING ${SELECT_COLUMNS}`,
+    [sceneId, !!enabled]
   );
   return rows[0] || null;
 }
@@ -198,7 +237,7 @@ async function setProductReferenceForProject(projectId, key, exceptSceneId) {
     params.push(exceptSceneId);
   }
   const { rowCount } = await query(
-    `UPDATE scenes SET product_reference_key = $2 WHERE ${where}`,
+    `UPDATE scenes SET product_reference_key = $2, product_custom_reference_id = NULL WHERE ${where}`,
     params
   );
   return rowCount;
@@ -228,7 +267,9 @@ module.exports = {
   setVoiceKey,
   patchFields,
   setProductReferenceKey,
+  setProductCustomReferenceId,
   setProductReferenceForProject,
+  setMultiShotEnabled,
   countByStatus,
   deleteByProject,
 };

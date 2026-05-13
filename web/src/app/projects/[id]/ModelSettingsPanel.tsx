@@ -43,12 +43,12 @@ const SIMPLE_RESOLUTION: { value: string; label: string }[] = [
 
 const VIDEO_MODELS = [
   {
-    id: 'bytedance/seedance-2.0/image-to-video',
-    label: 'Seedance 2.0 (image → video)',
+    id: 'fal-ai/bytedance/seedance/v1/pro/image-to-video',
+    label: 'Seedance 1.0 Pro (default)',
   },
   {
-    id: 'fal-ai/bytedance/seedance/v1/pro/image-to-video',
-    label: 'Seedance v1 Pro (legacy)',
+    id: 'bytedance/seedance-2.0/image-to-video',
+    label: 'Seedance 2.0 (optional)',
   },
 ] as const;
 
@@ -90,7 +90,7 @@ export function defaultImageSettings(): ImageModelSettings {
 
 export function defaultVideoSettings(): VideoModelSettings {
   return {
-    videoModelId: 'bytedance/seedance-2.0/image-to-video',
+    videoModelId: 'fal-ai/bytedance/seedance/v1/pro/image-to-video',
     seedance20: {
       resolution: '720p',
       duration: 'auto',
@@ -259,6 +259,15 @@ export function ImageModelPanel({
             </button>
           </div>
         </div>
+
+        {img.imageProvider !== 'fal' && (
+          <p className="text-[11px] text-amber-100/90 rounded-lg border border-amber-400/25 bg-amber-500/[0.08] px-3 py-2 leading-relaxed">
+            <span className="font-medium text-amber-50">Product photos:</span> With Higgsfield first, the worker registers a{' '}
+            <span className="text-white/90">Soul ID</span> (<code className="text-[10px] text-white/80">custom_reference_id</code>) from your upload before generating variants — stronger identity than{' '}
+            <code className="text-[10px] text-white/80">image_url</code> alone. Hard poses may still need retries or a custom uploaded frame; switching to{' '}
+            <span className="text-white/90">fal.ai only</span> skips Soul entirely.
+          </p>
+        )}
 
         <label className="block">
           <span className="text-[13px] font-medium text-white block mb-2">
@@ -538,14 +547,24 @@ export function VideoModelPanel({
         </span>
       </div>
       <p className="text-[11px] text-ink-200/70 mb-4 leading-relaxed">
-        Tune how each picked image is animated into video.{' '}
+        Default is Seedance 1.0 Pro; switch to 2.0 for newer controls (resolution,
+        duration string, aspect ratio, audio).{' '}
         <a
           className="text-brand-300 hover:underline"
-          href="https://fal.ai/models/bytedance/seedance-2.0/image-to-video/api"
+          href="https://fal.ai/models/fal-ai/bytedance/seedance/v1/pro/image-to-video"
           target="_blank"
           rel="noreferrer"
         >
-          Docs ↗
+          1.0 docs ↗
+        </a>
+        {' · '}
+        <a
+          className="text-brand-300 hover:underline"
+          href="https://fal.ai/docs/model-api-reference/video-generation-api/bytedance-seedance-2.0-image-to-video.md"
+          target="_blank"
+          rel="noreferrer"
+        >
+          2.0 docs ↗
         </a>
       </p>
 
@@ -650,9 +669,10 @@ export function VideoModelPanel({
         </>
       ) : (
         <p className="mt-3 text-[11px] text-ink-200/70">
-          Legacy Seedance v1 uses scene duration (3–10s) and 1080p-style output.
-          Switch to Seedance 2.0 above to tune resolution, duration string, aspect
-          ratio, and audio.
+          Seedance 1.0 Pro uses each scene&apos;s duration (mapped to Fal&apos;s
+          2–12s), 1080p output, and standard aspect/safety defaults. Pick Seedance 2.0
+          above for resolution, <code className="text-[10px] text-white/80">auto</code>
+          / fixed-second duration strings, aspect ratio, and optional audio.
         </p>
       )}
 

@@ -37,14 +37,19 @@ export function VoicePreviewCard({
 }: Props) {
   const fav = isFavorite ?? voice.isFavorite ?? false;
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playingRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
+
+  useEffect(() => {
     const onSomeoneElsePlays = (a: HTMLAudioElement | null) => {
-      if (a !== audioRef.current && playing) {
+      if (a !== audioRef.current && playingRef.current) {
         audioRef.current?.pause();
         setPlaying(false);
       }
@@ -53,7 +58,7 @@ export function VoicePreviewCard({
     return () => {
       playingSubscribers.delete(onSomeoneElsePlays);
     };
-  }, [playing]);
+  }, []);
 
   useEffect(() => {
     return () => {

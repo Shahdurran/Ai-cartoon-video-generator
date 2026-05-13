@@ -40,12 +40,47 @@ export default async function VideosReviewPage({
     redirect(`/projects/${project.id}`);
   }
 
-  // If we don't have a video render for every scene yet, the picker
-  // would just show empty cards -- send them back to the live status
-  // page until Seedance finishes.
+  // A scene is "settled" when it either rendered successfully OR
+  // terminally failed -- both count for the review page because the user
+  // can preview successes and retry failures here. We only bounce back
+  // to /status if the project hasn't reached videos-review at all yet,
+  // i.e. there's still in-flight work to watch. Bouncing on partial
+  // failure caused a ping-pong loop because the StatusStream auto-jumps
+  // to /videos on the 'videos-review' status and /videos used to jump
+  // straight back, hammering the API.
+  const allSettled =
+    project.scenes.length > 0 &&
+    project.scenes.every((s) =>
+      s.multiShotEnabled
+        ? (s.shots ?? []).length > 0 &&
+          (s.shots ?? []).every(
+            (sh) => !!sh.videoKey || sh.status === 'failed'
+          )
+        : !!s.videoKey || s.status === 'failed'
+    );
+  const hasAnyRender =
+    project.scenes.length > 0 &&
+    project.scenes.some((s) =>
+      s.multiShotEnabled
+        ? (s.shots ?? []).some((sh) => !!sh.videoKey)
+        : !!s.videoKey
+    );
   const allRendered =
-    project.scenes.length > 0 && project.scenes.every((s) => !!s.videoKey);
-  if (!allRendered && project.status !== 'failed') {
+    project.scenes.length > 0 &&
+    project.scenes.every((s) =>
+      s.multiShotEnabled
+        ? (s.shots ?? []).length > 0 &&
+          (s.shots ?? []).every((sh) => !!sh.videoKey)
+        : !!s.videoKey
+    );
+  const shouldBounceToStatus =
+    project.status !== 'failed' &&
+    project.status !== 'videos-review' &&
+    project.status !== 'complete' &&
+    project.status !== 'assembling' &&
+    !allSettled &&
+    !hasAnyRender;
+  if (shouldBounceToStatus) {
     redirect(`/projects/${project.id}/status`);
   }
 

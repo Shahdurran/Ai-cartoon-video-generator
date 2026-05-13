@@ -220,6 +220,10 @@ const keys = {
     `projects/${projectId}/scenes/${sceneId}/voice.${ext}`,
   sceneVideo: (projectId, sceneId) =>
     `projects/${projectId}/scenes/${sceneId}/video.mp4`,
+  shotImage: (projectId, sceneId, shotId, variant, ext = 'png') =>
+    `projects/${projectId}/scenes/${sceneId}/shots/${shotId}/image-${variant}.${ext}`,
+  shotVideo: (projectId, sceneId, shotId) =>
+    `projects/${projectId}/scenes/${sceneId}/shots/${shotId}/video.mp4`,
   subtitles: (projectId) => `projects/${projectId}/subtitles.srt`,
   finalVideo: (projectId) => `projects/${projectId}/final.mp4`,
   hookVideo: (projectId, variantId) =>

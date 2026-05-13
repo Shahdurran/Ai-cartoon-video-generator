@@ -42,6 +42,17 @@ function pickAspectRatio(ratio) {
   return '16:9';
 }
 
+/**
+ * Soul rejects seeds outside 0..1_000_000 (422). Our Fal path uses a wider
+ * random range; map any integer into the valid Soul range (same envelope as
+ * @higgsfield/client `seed()`).
+ */
+function normalizeSoulSeed(seed) {
+  if (seed == null || !Number.isFinite(Number(seed))) return null;
+  const n = Math.floor(Number(seed));
+  return ((n % 1_000_001) + 1_000_001) % 1_000_001;
+}
+
 function extractError(err) {
   if (err.response) {
     const status = err.response.status;
@@ -56,14 +67,30 @@ function extractError(err) {
  * Submit a Soul generation request and return the queued response.
  * Caller polls status_url until completion.
  */
-async function submit({ prompt, aspectRatio, resolution, seed, imageUrl }) {
+async function submit({
+  prompt,
+  aspectRatio,
+  resolution,
+  seed,
+  imageUrl,
+  customReferenceId,
+  customReferenceStrength,
+}) {
   const body = {
     prompt,
     aspect_ratio: pickAspectRatio(aspectRatio),
     resolution: resolution === '1080p' ? '1080p' : '720p',
   };
-  if (seed != null) body.seed = seed;
-  if (imageUrl) body.image_url = imageUrl;
+  const soulSeed = normalizeSoulSeed(seed);
+  if (soulSeed != null) body.seed = soulSeed;
+  if (customReferenceId) {
+    body.custom_reference_id = customReferenceId;
+    if (customReferenceStrength != null) {
+      body.custom_reference_strength = customReferenceStrength;
+    }
+  } else if (imageUrl) {
+    body.image_url = imageUrl;
+  }
 
   const res = await axios.post(`${BASE_URL}/${MODEL_ID}`, body, {
     headers: {
@@ -89,12 +116,83 @@ async function pollStatus(statusUrl) {
  * first image URL plus the time spent waiting (in ms). Throws on failure
  * with a human-readable message.
  */
+/**
+ * Register a product / style image as a Higgsfield "custom reference" (Soul ID).
+ * POST /v1/custom-references then poll until status is completed (official JS SDK).
+ *
+ * @param {{ imageUrl: string, name?: string, pollIntervalMs?: number, timeoutMs?: number }} opts
+ * @returns {Promise<string>} custom reference id for use as custom_reference_id on Soul jobs
+ */
+async function createCustomReferenceFromImageUrl({
+  imageUrl,
+  name = 'product-reference',
+  pollIntervalMs = 2000,
+  timeoutMs = 300_000,
+}) {
+  if (!isConfigured()) {
+    throw new Error('HIGGSFIELD_API_KEY / HIGGSFIELD_API_SECRET not configured');
+  }
+  if (!imageUrl || typeof imageUrl !== 'string') {
+    throw new Error('createCustomReferenceFromImageUrl: imageUrl required');
+  }
+
+  const safeName = String(name || 'ref').slice(0, 200);
+  const body = {
+    name: safeName,
+    input_images: [{ type: 'image_url', image_url: imageUrl }],
+  };
+
+  let id;
+  try {
+    const res = await axios.post(`${BASE_URL}/v1/custom-references`, body, {
+      headers: {
+        Authorization: authHeader(),
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      timeout: 60_000,
+    });
+    id = res.data?.id;
+    if (!id) throw new Error('response missing id');
+  } catch (err) {
+    throw new Error(`Higgsfield custom-reference create failed: ${extractError(err)}`);
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (Date.now() > deadline) {
+      throw new Error(`Higgsfield custom-reference ${id} timed out after ${timeoutMs}ms`);
+    }
+    await new Promise((r) => setTimeout(r, pollIntervalMs));
+    let st;
+    try {
+      const res = await axios.get(`${BASE_URL}/v1/custom-references/${id}`, {
+        headers: { Authorization: authHeader(), Accept: 'application/json' },
+        timeout: 30_000,
+      });
+      st = res.data;
+    } catch (err) {
+      console.warn(`   ↳ Higgsfield Soul ID poll error (retry): ${extractError(err)}`);
+      continue;
+    }
+    const status = st?.status;
+    if (status === 'completed') return id;
+    if (status === 'failed') {
+      throw new Error(`Higgsfield custom-reference failed: ${st.error || JSON.stringify(st)}`);
+    }
+    // not_ready | queued | in_progress — keep polling
+  }
+}
+
 async function generateOne({
   prompt,
   aspectRatio = '16:9',
   resolution = '720p',
   seed,
   imageUrl,
+  customReferenceId,
+  customReferenceStrength,
   pollIntervalMs = 1500,
   timeoutMs = 180_000,
 }) {
@@ -105,7 +203,15 @@ async function generateOne({
   const submitStart = Date.now();
   let queued;
   try {
-    queued = await submit({ prompt, aspectRatio, resolution, seed, imageUrl });
+    queued = await submit({
+      prompt,
+      aspectRatio,
+      resolution,
+      seed,
+      imageUrl,
+      customReferenceId,
+      customReferenceStrength,
+    });
   } catch (err) {
     throw new Error(`Higgsfield submit failed: ${extractError(err)}`);
   }
@@ -162,6 +268,7 @@ async function generateOne({
 module.exports = {
   isConfigured,
   generateOne,
+  createCustomReferenceFromImageUrl,
   // Exposed for tests.
-  _internal: { submit, pollStatus },
+  _internal: { submit, pollStatus, normalizeSoulSeed },
 };

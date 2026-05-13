@@ -1,28 +1,23 @@
 @echo off
 echo.
 echo ========================================
-echo  Starting Video Generation System
+echo  AI Cartoon Generator (API + Web)
 echo ========================================
 echo.
-echo Backend API: http://localhost:3000
-echo Frontend UI: http://localhost:5173
+echo Backend API: http://localhost:4000
+echo Next.js app: http://localhost:3001  (set NEXT_PUBLIC_API_URL=http://localhost:4000 in web\.env.local)
 echo.
 echo Starting both servers...
 echo ========================================
 echo.
 
-REM Start backend in a new window
-start "Backend Server" cmd /k "npm start"
+start "Cartoon API" cmd /k "cd /d %~dp0 && npm start"
 
-REM Wait a moment for backend to start
 timeout /t 3 /nobreak >nul
 
-REM Start frontend in a new window
-start "Frontend Server" cmd /k "cd frontend && npm run dev"
+start "Next.js web" cmd /k "cd /d %~dp0web && set NEXT_PUBLIC_API_URL=http://localhost:4000&& npx next dev -p 3001"
 
 echo.
-echo Both servers are starting in separate windows!
+echo Both servers are starting in separate windows.
 echo.
-echo Press any key to exit this window...
 pause >nul
-

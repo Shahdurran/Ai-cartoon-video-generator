@@ -125,9 +125,29 @@ const LIVE_STATES = new Set([
   'assembling',
 ]);
 
+/** Fixed locale/options so SSR (Node) and the browser render the same string — avoids hydration errors from `toLocaleString()` defaults. */
+const LIST_CREATED_AT = new Intl.DateTimeFormat('en-US', {
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: true,
+});
+
+function formatListCreatedAt(iso: string): string {
+  const d = new Date(iso);
+  const t = d.getTime();
+  if (Number.isNaN(t)) return iso;
+  return LIST_CREATED_AT.format(d);
+}
+
 export function ProjectsList({ initialProjects }: Props) {
   const [projects, setProjects] = useState(initialProjects);
 
+  // Mount-only polling: never depend on `projects` here — that re-ran the
+  // effect on every API response, stacked timers, and could hammer /api/projects.
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -136,14 +156,14 @@ export function ProjectsList({ initialProjects }: Props) {
       try {
         const { projects: fresh } = await api.listProjects();
         if (!cancelled) setProjects(fresh);
+        const anyLive = fresh.some((p) => LIVE_STATES.has(p.status));
+        if (!cancelled) {
+          timer = setTimeout(tick, anyLive ? POLL_LIVE_MS : POLL_IDLE_MS);
+        }
       } catch {
-        /* swallow; try again next interval */
-      } finally {
-        if (cancelled) return;
-        const anyLive = (projects.length ? projects : initialProjects).some(
-          (p) => LIVE_STATES.has(p.status)
-        );
-        timer = setTimeout(tick, anyLive ? POLL_LIVE_MS : POLL_IDLE_MS);
+        if (!cancelled) {
+          timer = setTimeout(tick, POLL_IDLE_MS);
+        }
       }
     }
 
@@ -152,8 +172,7 @@ export function ProjectsList({ initialProjects }: Props) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects]);
+  }, []);
 
   if (projects.length === 0) {
     return (
@@ -200,7 +219,9 @@ export function ProjectsList({ initialProjects }: Props) {
                   </div>
                   <div className="text-xs text-ink-100/60 mt-1">
                     {p.sceneCount} scenes ·{' '}
-                    {new Date(p.createdAt).toLocaleString()}
+                    <span suppressHydrationWarning>
+                      {formatListCreatedAt(p.createdAt)}
+                    </span>
                   </div>
                   {label && (
                     <div className="mt-2 text-[12px] text-ink-100/85">
