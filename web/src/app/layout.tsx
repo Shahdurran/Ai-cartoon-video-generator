@@ -49,9 +49,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </header>
 
-          <main className="flex-1 animate-fade-in">{children}</main>
+          {/* relative z-10 so fixed UI inside main (e.g. Scenes launcher) stacks
+              above the footer; without it, the footer sibling paints later and
+              covers bottom-fixed controls under isolation: isolate on .app-shell. */}
+          <main className="relative z-10 flex-1 animate-fade-in">{children}</main>
 
-          <footer className="border-t border-white/10 text-[11px] text-ink-200/60 backdrop-blur-md bg-ink-800/30">
+          <footer className="relative z-0 border-t border-white/10 text-[11px] text-ink-200/60 backdrop-blur-md bg-ink-800/30">
             <div className="max-w-6xl mx-auto px-6 py-4">
               Internal tool. Powered by Claude, Flux, Seedance, ElevenLabs, AssemblyAI.
             </div>
