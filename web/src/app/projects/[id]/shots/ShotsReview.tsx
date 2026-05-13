@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   api,
+  isLockedShot,
   type Project,
   type Scene,
   type SceneShot,
@@ -22,12 +23,37 @@ const ROLE_OPTIONS: Array<{ value: SuggestedShot['role']; label: string }> = [
   { value: 'custom', label: 'Custom' },
 ];
 
+const MAX_SHOTS_PER_SCENE = 6;
+const MIN_SHOT_SECS = 1;
+const MAX_SHOT_SECS = 10;
+
 type DraftShot = {
   id?: string;
   role: SuggestedShot['role'];
   imagePrompt: string;
-  durationSeconds?: number;
+  durationSeconds: number;
+  /** True for the "keep approved scene image" shot. Image is the parent
+   *  scene's approved variant; no new generation runs for this shot. */
+  useApprovedSceneImage?: boolean;
 };
+
+function clampDuration(v: number, fallback: number): number {
+  if (!Number.isFinite(v) || v <= 0) return fallback;
+  if (v < MIN_SHOT_SECS) return MIN_SHOT_SECS;
+  if (v > MAX_SHOT_SECS) return MAX_SHOT_SECS;
+  return Math.round(v * 10) / 10;
+}
+
+function shotFromServer(sh: SceneShot, fallbackSecs: number): DraftShot {
+  const locked = isLockedShot(sh);
+  return {
+    id: sh.id,
+    role: sh.role,
+    imagePrompt: locked ? '' : sh.imagePrompt,
+    durationSeconds: clampDuration(Number(sh.durationSeconds), fallbackSecs),
+    useApprovedSceneImage: locked,
+  };
+}
 
 function defaultSeedFromScene(scene: Scene, targetSecs: number): DraftShot[] {
   if (scene.suggestedShots && scene.suggestedShots.length >= 2) {
@@ -51,20 +77,21 @@ function defaultSeedFromScene(scene: Scene, targetSecs: number): DraftShot[] {
   ];
 }
 
+function sumShotDurations(list: DraftShot[]): number {
+  return list.reduce((acc, s) => acc + (Number(s.durationSeconds) || 0), 0);
+}
+
 export function ShotsReview({ initialProject }: Props) {
   const router = useRouter();
   const [project, setProject] = useState<Project>(initialProject);
+  const initialTarget =
+    Number(initialProject.multiShotTargetSeconds) || 2.5;
   const [drafts, setDrafts] = useState<Record<string, DraftShot[]>>(() => {
     const out: Record<string, DraftShot[]> = {};
     for (const s of initialProject.scenes ?? []) {
       const shots = s.shots ?? [];
       if (s.multiShotEnabled && shots.length > 0) {
-        out[s.id] = shots.map((sh) => ({
-          id: sh.id,
-          role: sh.role,
-          imagePrompt: sh.imagePrompt,
-          durationSeconds: sh.durationSeconds,
-        }));
+        out[s.id] = shots.map((sh) => shotFromServer(sh, initialTarget));
       }
     }
     return out;
@@ -96,12 +123,9 @@ export function ShotsReview({ initialProject }: Props) {
             .map((d) => d.id)
             .join('|');
           if (!cur || serverIds !== draftIds) {
-            next[s.id] = (s.shots || []).map((sh) => ({
-              id: sh.id,
-              role: sh.role,
-              imagePrompt: sh.imagePrompt,
-              durationSeconds: sh.durationSeconds,
-            }));
+            next[s.id] = (s.shots || []).map((sh) =>
+              shotFromServer(sh, targetSecs)
+            );
           }
         }
         return next;
@@ -165,12 +189,9 @@ export function ShotsReview({ initialProject }: Props) {
       setDrafts((d) => {
         const copy = { ...d };
         if (enable) {
-          const seedFromServer = (res.scene?.shots || []).map((sh: SceneShot) => ({
-            id: sh.id,
-            role: sh.role,
-            imagePrompt: sh.imagePrompt,
-            durationSeconds: sh.durationSeconds,
-          }));
+          const seedFromServer = (res.scene?.shots || []).map((sh: SceneShot) =>
+            shotFromServer(sh, targetSecs)
+          );
           copy[scene.id] =
             seedFromServer.length > 0
               ? seedFromServer
@@ -198,7 +219,7 @@ export function ShotsReview({ initialProject }: Props) {
   function addShot(sceneId: string) {
     setDrafts((d) => {
       const list = (d[sceneId] || []).slice();
-      if (list.length >= 6) return d;
+      if (list.length >= MAX_SHOTS_PER_SCENE) return d;
       list.push({
         role: 'detail',
         imagePrompt: '',
@@ -217,14 +238,47 @@ export function ShotsReview({ initialProject }: Props) {
     });
   }
 
+  function toggleApprovedSceneImageShot(sceneId: string) {
+    const sceneObj = (project.scenes ?? []).find((s) => s.id === sceneId);
+    if (!sceneObj) return;
+    setDrafts((d) => {
+      const list = (d[sceneId] || []).slice();
+      const existingIdx = list.findIndex((s) => s.useApprovedSceneImage);
+      if (existingIdx >= 0) {
+        list.splice(existingIdx, 1);
+        return { ...d, [sceneId]: list };
+      }
+      if (list.length >= MAX_SHOTS_PER_SCENE) return d;
+      list.unshift({
+        role: 'wide',
+        imagePrompt: '',
+        durationSeconds: targetSecs,
+        useApprovedSceneImage: true,
+      });
+      return { ...d, [sceneId]: list };
+    });
+  }
+
+  function validateSceneShots(scene: Scene, list: DraftShot[]): string | null {
+    if (list.length < 2) {
+      return `Scene ${scene.sceneIndex + 1}: needs at least 2 shots`;
+    }
+    if (list.some((s) => !s.useApprovedSceneImage && !s.imagePrompt.trim())) {
+      return `Scene ${scene.sceneIndex + 1}: every shot needs a prompt`;
+    }
+    const total = sumShotDurations(list);
+    const sceneSecs = Number(scene.durationSeconds) || 0;
+    if (sceneSecs > 0 && total > sceneSecs + 0.05) {
+      return `Scene ${scene.sceneIndex + 1}: shot durations total ${total.toFixed(1)}s but the scene is only ${sceneSecs}s. Trim a shot or remove one.`;
+    }
+    return null;
+  }
+
   async function saveSceneShots(scene: Scene) {
     const list = drafts[scene.id] || [];
-    if (list.length < 2) {
-      setError(`Scene ${scene.sceneIndex + 1}: needs at least 2 shots`);
-      return;
-    }
-    if (list.some((s) => !s.imagePrompt.trim())) {
-      setError(`Scene ${scene.sceneIndex + 1}: every shot needs a prompt`);
+    const err = validateSceneShots(scene, list);
+    if (err) {
+      setError(err);
       return;
     }
     setError(null);
@@ -235,8 +289,9 @@ export function ShotsReview({ initialProject }: Props) {
         scene.id,
         list.map((s) => ({
           role: s.role,
-          imagePrompt: s.imagePrompt,
-          durationSeconds: s.durationSeconds || targetSecs,
+          imagePrompt: s.useApprovedSceneImage ? '' : s.imagePrompt,
+          durationSeconds: clampDuration(Number(s.durationSeconds), targetSecs),
+          useApprovedSceneImage: s.useApprovedSceneImage === true,
         }))
       );
       const normalizedShots = (res.shots ?? []).map((sh) => ({
@@ -253,12 +308,7 @@ export function ShotsReview({ initialProject }: Props) {
       }));
       setDrafts((d) => ({
         ...d,
-        [scene.id]: normalizedShots.map((sh) => ({
-          id: sh.id,
-          role: sh.role,
-          imagePrompt: sh.imagePrompt,
-          durationSeconds: sh.durationSeconds,
-        })),
+        [scene.id]: normalizedShots.map((sh) => shotFromServer(sh, targetSecs)),
       }));
     } catch (err: any) {
       setError(err.message);
@@ -269,6 +319,21 @@ export function ShotsReview({ initialProject }: Props) {
 
   async function approveShots() {
     setError(null);
+
+    // Block before queueing if any scene's draft is invalid (over budget
+    // or missing prompts). Surfacing this here is much friendlier than
+    // letting the backend 400 mid-batch.
+    for (const scene of project.scenes ?? []) {
+      if (!scene.multiShotEnabled) continue;
+      const list = drafts[scene.id];
+      if (!list) continue;
+      const errMsg = validateSceneShots(scene, list);
+      if (errMsg) {
+        setError(errMsg);
+        return;
+      }
+    }
+
     setBusy(true);
     try {
       // Persist any unsaved drafts first so the user's edits are not lost.
@@ -281,7 +346,13 @@ export function ShotsReview({ initialProject }: Props) {
           list.length !== serverShots.length ||
           list.some((d, i) => {
             const s = serverShots[i];
-            return !s || d.imagePrompt.trim() !== s.imagePrompt || d.role !== s.role;
+            if (!s) return true;
+            const serverLocked = isLockedShot(s);
+            if (d.role !== s.role) return true;
+            if ((d.useApprovedSceneImage === true) !== serverLocked) return true;
+            if (!serverLocked && d.imagePrompt.trim() !== s.imagePrompt) return true;
+            if (Number(d.durationSeconds) !== Number(s.durationSeconds)) return true;
+            return false;
           });
         if (dirty) {
           await api.replaceShots(
@@ -289,8 +360,9 @@ export function ShotsReview({ initialProject }: Props) {
             scene.id,
             list.map((s) => ({
               role: s.role,
-              imagePrompt: s.imagePrompt,
-              durationSeconds: s.durationSeconds || targetSecs,
+              imagePrompt: s.useApprovedSceneImage ? '' : s.imagePrompt,
+              durationSeconds: clampDuration(Number(s.durationSeconds), targetSecs),
+              useApprovedSceneImage: s.useApprovedSceneImage === true,
             }))
           );
         }
@@ -329,6 +401,7 @@ export function ShotsReview({ initialProject }: Props) {
     ].includes(project.status);
   }, [project.status]);
 
+  const inShotImagesPending = project.status === 'shot-images-pending';
   const inShotImagesReview = project.status === 'shot-images-review';
   const multiSceneCount = (project.scenes ?? []).filter((s) => s.multiShotEnabled).length;
   const allShotsPicked =
@@ -340,11 +413,49 @@ export function ShotsReview({ initialProject }: Props) {
             (s.shots ?? []).every((sh) => !!sh.selectedImageId)
     );
 
+  // Count shots that still need variants while in shot-images-pending so
+  // the banner can give a "X of Y still rendering" progress hint instead
+  // of just disappearing into the void.
+  const pendingShotProgress = (() => {
+    if (!inShotImagesPending) return null;
+    let total = 0;
+    let done = 0;
+    for (const s of project.scenes ?? []) {
+      if (!s.multiShotEnabled) continue;
+      for (const sh of s.shots ?? []) {
+        if (isLockedShot(sh)) continue;
+        total += 1;
+        if ((sh.imageVariants ?? []).length > 0 || sh.status === 'failed') {
+          done += 1;
+        }
+      }
+    }
+    return { total, done };
+  })();
+
   return (
     <div className="space-y-6">
       {error && (
         <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200 animate-fade-in">
           {error}
+        </div>
+      )}
+
+      {inShotImagesPending && (
+        <div className="rounded-xl border border-[#FF4689]/30 bg-[#FF4689]/10 px-4 py-3 text-sm text-[#ffd6e0] animate-fade-in">
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-[#FF4689]" />
+            <span className="font-medium">Generating shot images…</span>
+            {pendingShotProgress && pendingShotProgress.total > 0 && (
+              <span className="text-[#ffd6e0]/80">
+                {pendingShotProgress.done} of {pendingShotProgress.total} shots ready
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-[#ffd6e0]/75">
+            Each multi-shot scene generates new variants per shot. This page
+            will auto-refresh when they&rsquo;re ready — you can leave and come back.
+          </p>
         </div>
       )}
 
@@ -409,6 +520,7 @@ export function ShotsReview({ initialProject }: Props) {
           onUpdateShot={(idx, patch) => updateShotDraft(scene.id, idx, patch)}
           onAddShot={() => addShot(scene.id)}
           onRemoveShot={(idx) => removeShot(scene.id, idx)}
+          onToggleApprovedShot={() => toggleApprovedSceneImageShot(scene.id)}
           onSave={() => saveSceneShots(scene)}
           onShotChanged={refresh}
         />
@@ -429,6 +541,7 @@ function SceneShotsCard({
   onUpdateShot,
   onAddShot,
   onRemoveShot,
+  onToggleApprovedShot,
   onSave,
   onShotChanged,
 }: {
@@ -443,6 +556,7 @@ function SceneShotsCard({
   onUpdateShot: (idx: number, patch: Partial<DraftShot>) => void;
   onAddShot: () => void;
   onRemoveShot: (idx: number) => void;
+  onToggleApprovedShot: () => void;
   onSave: () => void;
   onShotChanged: () => void;
 }) {
@@ -451,7 +565,7 @@ function SceneShotsCard({
   const showShotPickers =
     scene.multiShotEnabled &&
     shots.length > 0 &&
-    shots.some((sh) => (sh.imageVariants ?? []).length > 0);
+    shots.some((sh) => !isLockedShot(sh) && (sh.imageVariants ?? []).length > 0);
 
   // The variant the user approved on the Images step. We surface it on
   // multi-shot scenes so they remember which look they signed off on
@@ -461,6 +575,12 @@ function SceneShotsCard({
     sceneVariants.find((v) => v.id === scene.selectedImageId) ||
     sceneVariants[0] ||
     null;
+  const hasApprovedShot = (draft || []).some((s) => s.useApprovedSceneImage);
+  const draftList = draft || [];
+  const sceneSecs = Number(scene.durationSeconds) || 0;
+  const totalSecs = sumShotDurations(draftList);
+  const overBudget = sceneSecs > 0 && totalSecs > sceneSecs + 0.05;
+  const remainingSecs = Math.max(0, sceneSecs - totalSecs);
 
   return (
     <div className="glass rounded-2xl p-5 space-y-4">
@@ -505,31 +625,71 @@ function SceneShotsCard({
 
       {!scene.multiShotEnabled && (
         <p className="text-xs text-ink-100/55">
-          Single Seedance clip · enable multi-shot to cross-cut between
-          ~{targetSecs}s shots of this scene.
+          Single Seedance clip · enable multi-shot to cross-cut between several
+          shorter cinematic shots of this scene.
+        </p>
+      )}
+
+      {scene.multiShotEnabled && (
+        <p className="text-[11px] text-ink-100/55">
+          Multi-shot generates <span className="text-white/85">new images per shot</span> and ignores the scene&rsquo;s approved
+          variant unless you add it as a shot below. Each shot&rsquo;s duration
+          contributes to the scene&rsquo;s total length.
         </p>
       )}
 
       {showShots && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs text-ink-100/60">
-              {(draft || []).length} shots ·{' '}
-              {(draft || []).map((d) => d.role).join(' → ')}
+              {draftList.length} shots · {draftList.map((d) => d.role).join(' → ')}
+            </div>
+            <div className={['text-[11px]', overBudget ? 'text-rose-300' : 'text-ink-100/60'].join(' ')}>
+              {totalSecs.toFixed(1)}s / {sceneSecs}s
+              {overBudget ? ' · over scene length' : remainingSecs > 0 ? ` · ${remainingSecs.toFixed(1)}s free` : ''}
             </div>
             {!editingLocked && !inShotImagesReview && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                {approvedSceneImage?.signedUrl && (
+                  <button
+                    onClick={onToggleApprovedShot}
+                    disabled={
+                      !hasApprovedShot &&
+                      draftList.length >= MAX_SHOTS_PER_SCENE
+                    }
+                    className={[
+                      'btn-ghost !px-2 !py-1 !text-[11px]',
+                      hasApprovedShot
+                        ? '!border-[#FF4689]/60 !text-[#ffb1c8]'
+                        : '',
+                    ].join(' ')}
+                    title={
+                      hasApprovedShot
+                        ? 'Remove the approved scene image from this scene\u2019s shots'
+                        : 'Add the approved scene image as one of this scene\u2019s shots'
+                    }
+                  >
+                    {hasApprovedShot
+                      ? 'Remove approved-image shot'
+                      : '+ Use approved image as a shot'}
+                  </button>
+                )}
                 <button
                   onClick={onAddShot}
-                  disabled={(draft || []).length >= 6}
+                  disabled={draftList.length >= MAX_SHOTS_PER_SCENE}
                   className="btn-ghost !px-2 !py-1 !text-[11px]"
                 >
                   + Add shot
                 </button>
                 <button
                   onClick={onSave}
-                  disabled={saving}
+                  disabled={saving || overBudget}
                   className="btn-ghost !px-2 !py-1 !text-[11px]"
+                  title={
+                    overBudget
+                      ? 'Trim a shot first — total exceeds scene length'
+                      : undefined
+                  }
                 >
                   {saving ? 'Saving…' : 'Save shots'}
                 </button>
@@ -537,62 +697,114 @@ function SceneShotsCard({
             )}
           </div>
 
-          {(draft || []).map((d, i) => (
-            <div
-              key={d.id || `new-${i}`}
-              className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] uppercase tracking-wider text-ink-100/60">
-                  Shot {i + 1}
-                </span>
-                <select
-                  value={d.role}
-                  disabled={editingLocked || inShotImagesReview}
-                  onChange={(e) =>
-                    onUpdateShot(i, {
-                      role: e.target.value as SuggestedShot['role'],
-                    })
-                  }
-                  className="rounded-lg border border-white/15 bg-black/40 px-2 py-1 text-xs text-white"
-                >
-                  {ROLE_OPTIONS.map((r) => (
-                    <option key={r.value} value={r.value}>
-                      {r.label}
-                    </option>
-                  ))}
-                </select>
-                <span className="ml-auto text-[10px] text-ink-100/50">
-                  ~
-                  {(Number(d.durationSeconds) || targetSecs).toFixed(1)}s
-                </span>
-                {!editingLocked && !inShotImagesReview && (draft || []).length > 2 && (
-                  <button
-                    onClick={() => onRemoveShot(i)}
-                    className="text-[11px] text-rose-300/80 hover:text-rose-200"
+          {draftList.map((d, i) => {
+            const locked = d.useApprovedSceneImage === true;
+            return (
+              <div
+                key={d.id || `new-${i}`}
+                className={[
+                  'rounded-xl border p-3 space-y-2',
+                  locked
+                    ? 'border-[#FF4689]/40 bg-[#FF4689]/[0.06]'
+                    : 'border-white/10 bg-white/[0.03]',
+                ].join(' ')}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] uppercase tracking-wider text-ink-100/60">
+                    Shot {i + 1}
+                  </span>
+                  {locked && (
+                    <span className="rounded bg-[#FF4689]/15 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#ffb1c8]">
+                      Approved image
+                    </span>
+                  )}
+                  <select
+                    value={d.role}
+                    disabled={editingLocked || inShotImagesReview}
+                    onChange={(e) =>
+                      onUpdateShot(i, {
+                        role: e.target.value as SuggestedShot['role'],
+                      })
+                    }
+                    className="rounded-lg border border-white/15 bg-black/40 px-2 py-1 text-xs text-white"
                   >
-                    Remove
-                  </button>
+                    {ROLE_OPTIONS.map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                  <label className="ml-auto flex items-center gap-1 text-[11px] text-ink-100/60">
+                    <span>Duration</span>
+                    <input
+                      type="number"
+                      min={MIN_SHOT_SECS}
+                      max={MAX_SHOT_SECS}
+                      step={0.1}
+                      value={d.durationSeconds}
+                      disabled={editingLocked || inShotImagesReview}
+                      onChange={(e) =>
+                        onUpdateShot(i, {
+                          durationSeconds: clampDuration(
+                            parseFloat(e.target.value),
+                            targetSecs
+                          ),
+                        })
+                      }
+                      className="w-16 rounded-lg border border-white/15 bg-black/40 px-2 py-1 text-right text-xs text-white"
+                    />
+                    <span className="text-[10px] text-ink-100/45">s</span>
+                  </label>
+                  {!editingLocked && !inShotImagesReview && draftList.length > 2 && (
+                    <button
+                      onClick={() => onRemoveShot(i)}
+                      className="text-[11px] text-rose-300/80 hover:text-rose-200"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                {locked ? (
+                  <div className="flex items-center gap-3">
+                    {approvedSceneImage?.signedUrl ? (
+                      <div className="h-14 w-20 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/40">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={approvedSceneImage.signedUrl}
+                          alt="Approved scene variant"
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                    ) : null}
+                    <p className="text-[11px] text-ink-100/65">
+                      Uses the variant approved on the Images step.{' '}
+                      <span className="text-white/80">No new image is generated</span> —
+                      Seedance animates this exact frame for {d.durationSeconds.toFixed(1)}s.
+                    </p>
+                  </div>
+                ) : (
+                  <textarea
+                    value={d.imagePrompt}
+                    disabled={editingLocked || inShotImagesReview}
+                    onChange={(e) =>
+                      onUpdateShot(i, { imagePrompt: e.target.value })
+                    }
+                    rows={2}
+                    placeholder="Describe this shot — same character/setting, different angle…"
+                    className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-ink-100/90"
+                  />
                 )}
               </div>
-              <textarea
-                value={d.imagePrompt}
-                disabled={editingLocked || inShotImagesReview}
-                onChange={(e) =>
-                  onUpdateShot(i, { imagePrompt: e.target.value })
-                }
-                rows={2}
-                placeholder="Describe this shot — same character/setting, different angle…"
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-ink-100/90"
-              />
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {showShotPickers && (
+      {scene.multiShotEnabled && shots.length > 0 && (
         <div className="space-y-3 pt-3 border-t border-white/10">
-          <div className="text-xs text-ink-100/60">Pick a variant per shot</div>
+          <div className="text-xs text-ink-100/60">
+            {showShotPickers ? 'Pick a variant per shot' : 'Shot images'}
+          </div>
           <div className="grid grid-cols-1 gap-3">
             {shots.map((shot) => (
               <ShotImageStrip
@@ -600,6 +812,7 @@ function SceneShotsCard({
                 projectId={projectId}
                 sceneId={scene.id}
                 shot={shot}
+                approvedSceneImage={approvedSceneImage}
                 onChanged={onShotChanged}
               />
             ))}
@@ -614,14 +827,17 @@ function ShotImageStrip({
   projectId,
   sceneId,
   shot,
+  approvedSceneImage,
   onChanged,
 }: {
   projectId: string;
   sceneId: string;
   shot: SceneShot;
+  approvedSceneImage: SceneImage | null;
   onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const locked = isLockedShot(shot);
   const variants = shot.imageVariants ?? [];
   const selected = variants.find((v) => v.id === shot.selectedImageId);
 
@@ -645,6 +861,49 @@ function ShotImageStrip({
     }
   }
 
+  // Locked shot: render the approved scene image as a single, fixed
+  // option. No regen, no picker — the user already chose this on step 2.
+  if (locked) {
+    return (
+      <div className="rounded-xl border border-[#FF4689]/40 bg-[#FF4689]/[0.05] p-3">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[11px] uppercase tracking-wider text-ink-100/60">
+            Shot {shot.shotIndex + 1} · {shot.role}
+          </span>
+          <span className="rounded bg-[#FF4689]/15 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#ffb1c8]">
+            Approved image
+          </span>
+          <span className="ml-auto text-[10px] text-ink-100/45">
+            {Number(shot.durationSeconds || 0).toFixed(1)}s
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="relative aspect-video overflow-hidden rounded-lg border-2 border-[#FF4689] ring-2 ring-[#FF4689]/30">
+            {approvedSceneImage?.signedUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={approvedSceneImage.signedUrl}
+                alt={`Approved scene variant for shot ${shot.shotIndex + 1}`}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="h-full w-full bg-white/5" />
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Pending generation: skeleton tiles so the user sees something is
+  // happening between hitting "Generate shot images" and the worker
+  // pushing variants. We pick the number from project.imageModelSettings
+  // when we have it, but default to 3 (the controller's default).
+  const expectedVariants = 3;
+  const showSkeleton =
+    variants.length === 0 &&
+    shot.status !== 'failed';
+
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
       <div className="flex items-center gap-2 mb-2">
@@ -656,17 +915,32 @@ function ShotImageStrip({
         </span>
         <button
           onClick={regen}
-          disabled={busy}
+          disabled={busy || showSkeleton}
           className="ml-auto btn-ghost !px-2 !py-1 !text-[10px]"
         >
           {busy ? '…' : 'Regenerate'}
         </button>
       </div>
-      {variants.length === 0 ? (
-        <div className="text-xs text-ink-100/55 py-4 text-center">
-          {shot.status === 'failed'
-            ? `Failed: ${shot.errorMessage || 'unknown error'}`
-            : 'Generating variants…'}
+      {showSkeleton ? (
+        <div>
+          <div className="grid grid-cols-3 gap-2">
+            {Array.from({ length: expectedVariants }).map((_, i) => (
+              <div
+                key={i}
+                className="relative aspect-video overflow-hidden rounded-lg border-2 border-white/10 bg-white/[0.03]"
+              >
+                <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-white/[0.02] via-white/[0.08] to-white/[0.02]" />
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-ink-100/55">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#FF4689]" />
+            Generating variants for this shot…
+          </div>
+        </div>
+      ) : variants.length === 0 ? (
+        <div className="text-xs text-rose-300/90 py-3 text-center">
+          Failed: {shot.errorMessage || 'unknown error'}
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-2">

@@ -12,6 +12,18 @@
 
 const { query, tx } = require('../index');
 
+/**
+ * Sentinel stored in scene_shots.image_prompt for "locked" shots whose
+ * image is reused from the parent scene's approved variant instead of
+ * being generated. The shotImagesProcessor skips these and the
+ * shots-review UI shows them with the approved-image thumbnail directly.
+ */
+const USE_APPROVED_SCENE_IMAGE_MARKER = '__use_approved_scene_image__';
+
+function isLockedShot(shot) {
+  return !!shot && shot.imagePrompt === USE_APPROVED_SCENE_IMAGE_MARKER;
+}
+
 const SELECT_COLUMNS = `
   id, scene_id AS "sceneId", shot_index AS "shotIndex",
   role, image_prompt AS "imagePrompt",
@@ -22,6 +34,53 @@ const SELECT_COLUMNS = `
   status, error_message AS "errorMessage", error_code AS "errorCode",
   created_at AS "createdAt"
 `;
+
+/**
+ * Re-order a scene's shots in a single transaction. `orderedIds` must be
+ * the full set of existing shot UUIDs for the scene, in the desired new
+ * order. We rewrite shot_index in two passes (temporary negative indices,
+ * then positive) so the UNIQUE(scene_id, shot_index) constraint never
+ * trips mid-update.
+ */
+async function reorder(sceneId, orderedIds) {
+  return tx(async (client) => {
+    const { rows: existing } = await client.query(
+      `SELECT id FROM scene_shots WHERE scene_id = $1`,
+      [sceneId]
+    );
+    const existingIds = new Set(existing.map((r) => r.id));
+    if (existingIds.size !== orderedIds.length) {
+      throw new Error('orderedIds length does not match existing shots');
+    }
+    for (const id of orderedIds) {
+      if (!existingIds.has(id)) {
+        throw new Error(`Shot ${id} does not belong to scene ${sceneId}`);
+      }
+    }
+
+    for (let i = 0; i < orderedIds.length; i++) {
+      await client.query(
+        `UPDATE scene_shots SET shot_index = $2 WHERE id = $1 AND scene_id = $3`,
+        [orderedIds[i], -(i + 1), sceneId]
+      );
+    }
+    for (let i = 0; i < orderedIds.length; i++) {
+      await client.query(
+        `UPDATE scene_shots SET shot_index = $2 WHERE id = $1 AND scene_id = $3`,
+        [orderedIds[i], i, sceneId]
+      );
+    }
+
+    const { rows } = await client.query(
+      `SELECT ${SELECT_COLUMNS}
+       FROM scene_shots
+       WHERE scene_id = $1
+       ORDER BY shot_index ASC`,
+      [sceneId]
+    );
+    return rows;
+  });
+}
 
 async function bulkReplace(sceneId, shots) {
   return tx(async (client) => {
@@ -164,6 +223,7 @@ async function patchFields(shotId, fields) {
 
 module.exports = {
   bulkReplace,
+  reorder,
   findByScene,
   findByProject,
   findById,
@@ -173,4 +233,6 @@ module.exports = {
   setFalRequestId,
   setVideoKey,
   patchFields,
+  USE_APPROVED_SCENE_IMAGE_MARKER,
+  isLockedShot,
 };

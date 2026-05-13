@@ -1227,14 +1227,41 @@ async function replaceShots(req, res, next) {
       role: String(s.role || 'wide'),
       imagePrompt: String(s.imagePrompt || '').trim(),
       durationSeconds: Number(s.durationSeconds) || targetSecs,
+      useApprovedSceneImage: !!s.useApprovedSceneImage,
     }));
     for (let i = 0; i < normalised.length; i++) {
-      if (!normalised[i].imagePrompt) {
+      const isLocked = normalised[i].useApprovedSceneImage;
+      if (isLocked) {
+        // Locked shots inherit the scene's approved image -- their image
+        // prompt is a marker the shotImagesProcessor recognises so it
+        // skips regeneration. Require the scene to actually have an
+        // approved variant at this point.
+        if (!scene.selectedImageId) {
+          return res.status(400).json({
+            error: `Shot ${i + 1}: cannot reuse approved scene image -- scene has no selected variant yet`,
+          });
+        }
+        normalised[i].imagePrompt = shotRepo.USE_APPROVED_SCENE_IMAGE_MARKER;
+      } else if (!normalised[i].imagePrompt) {
         return res.status(400).json({ error: `Shot ${i + 1}: imagePrompt is required` });
       }
     }
 
     const inserted = await shotRepo.bulkReplace(sceneId, normalised);
+
+    // For any locked shots, pre-populate selected_image_id with the scene's
+    // approved variant so the shotVideoProcessor can render straight from
+    // it later without needing per-shot image generation. We also flag the
+    // shot as 'image-ready' so it doesn't sit in 'pending' forever.
+    for (let i = 0; i < inserted.length; i++) {
+      if (normalised[i].useApprovedSceneImage) {
+        await shotRepo.updateSelectedImage(inserted[i].id, scene.selectedImageId);
+        await shotRepo.updateStatus(inserted[i].id, 'image-ready', null, null);
+        inserted[i].selectedImageId = scene.selectedImageId;
+        inserted[i].status = 'image-ready';
+      }
+    }
+
     if (!scene.multiShotEnabled) {
       await sceneRepo.setMultiShotEnabled(sceneId, true);
     }
@@ -1311,6 +1338,19 @@ async function approveShots(req, res, next) {
     for (const scene of multiScenes) {
       const shots = await shotRepo.findByScene(scene.id);
       for (const shot of shots) {
+        // Locked shots reuse the scene's approved variant -- no need to
+        // generate per-shot variants for them. Defensive: also ensure
+        // their selected_image_id stays bound to the current approved
+        // scene image (the user may have re-picked at images-review).
+        if (shotRepo.isLockedShot(shot)) {
+          if (scene.selectedImageId && shot.selectedImageId !== scene.selectedImageId) {
+            await shotRepo.updateSelectedImage(shot.id, scene.selectedImageId);
+          }
+          if (shot.status !== 'image-ready') {
+            await shotRepo.updateStatus(shot.id, 'image-ready', null, null);
+          }
+          continue;
+        }
         const variants = await sceneImageRepo.findByShot(shot.id);
         if (force || variants.length === 0) {
           await queues.shotImages.add('generate-variants', {
@@ -1489,6 +1529,59 @@ async function approveShotImages(req, res, next) {
 }
 
 /**
+ * Re-order the shots inside one multi-shot scene without re-rendering.
+ * Used by the scene-videos step so the user can rearrange shot videos
+ * before final assembly stitches them together. Only allowed once every
+ * shot has actually rendered (videoKey present) so we never re-order
+ * mid-flight and confuse the pipeline.
+ *
+ *   PUT /projects/:id/scenes/:sceneId/shots/order   { orderedShotIds: string[] }
+ */
+async function reorderShots(req, res, next) {
+  try {
+    const { id: projectId, sceneId } = req.params;
+    const { orderedShotIds } = req.body || {};
+
+    if (!Array.isArray(orderedShotIds) || orderedShotIds.length === 0) {
+      return res.status(400).json({ error: 'orderedShotIds[] is required' });
+    }
+
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const scene = await sceneRepo.findById(sceneId);
+    if (!scene || scene.projectId !== projectId) {
+      return res.status(404).json({ error: 'Scene not found' });
+    }
+    if (!scene.multiShotEnabled) {
+      return res
+        .status(400)
+        .json({ error: 'Scene is not multi-shot — nothing to reorder' });
+    }
+
+    const allowedStates = new Set([
+      'shot-images-review',
+      'videos-review',
+      'failed',
+    ]);
+    if (!allowedStates.has(project.status)) {
+      return res.status(409).json({
+        error: `Cannot reorder shots when project status is '${project.status}'`,
+      });
+    }
+
+    try {
+      const reordered = await shotRepo.reorder(sceneId, orderedShotIds);
+      res.json({ shots: reordered });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * Re-run Seedance for ONE shot.
  *   POST /projects/:id/scenes/:sceneId/shots/:shotId/regenerate-video
  */
@@ -1590,6 +1683,7 @@ module.exports = {
   regenerateShotImage,
   approveShotImages,
   regenerateShotVideo,
+  reorderShots,
   upload: memoryUpload,
   fontUpload,
 };

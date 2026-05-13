@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, type Project, type Scene } from '@/lib/api';
+import { api, isLockedShot, type Project, type Scene, type SceneShot } from '@/lib/api';
 import { subscribeProjectStatus } from '@/lib/projectStatusStream';
 import {
   inferScenePipelinePhases,
@@ -14,13 +14,53 @@ type SceneState = {
   voice: ScenePipelinePhase;
   video: ScenePipelinePhase;
   error?: string;
+  /** Per-shot video state for multi-shot scenes. Empty/undefined for
+   *  single-shot scenes — they only have the aggregate `video` pill. */
+  shotVideos?: Record<string, ScenePipelinePhase>;
 };
 
-const PHASES: Array<{ key: keyof SceneState; label: string }> = [
+const PHASES: Array<{ key: 'image' | 'voice' | 'video'; label: string }> = [
   { key: 'image', label: 'Image' },
   { key: 'voice', label: 'Voice' },
   { key: 'video', label: 'Video' },
 ];
+
+/**
+ * Aggregate per-shot video states into a single scene-level pill.
+ *   - Any failed terminal shot -> 'failed'
+ *   - Every shot 'complete'    -> 'complete'
+ *   - Any shot mid-flight      -> 'running'
+ *   - Otherwise                -> 'idle'
+ */
+function aggregateShotVideos(
+  shotMap: Record<string, ScenePipelinePhase> | undefined
+): ScenePipelinePhase {
+  if (!shotMap) return 'idle';
+  const values = Object.values(shotMap);
+  if (values.length === 0) return 'idle';
+  if (values.some((v) => v === 'failed')) return 'failed';
+  if (values.every((v) => v === 'complete')) return 'complete';
+  if (
+    values.some((v) =>
+      ['running', 'queued', 'polling', 'submitting', 'requeued'].includes(v)
+    )
+  )
+    return 'running';
+  return 'idle';
+}
+
+function deriveShotVideo(shot: SceneShot, projectStatus: string): ScenePipelinePhase {
+  if (shot.videoKey) return 'complete';
+  if (shot.status === 'failed') return 'failed';
+  if (
+    projectStatus === 'generating' ||
+    projectStatus === 'videos-review' ||
+    projectStatus === 'assembling'
+  ) {
+    return 'running';
+  }
+  return 'idle';
+}
 
 /**
  * Translate the backend's `assembly` SSE payloads into the pill states
@@ -49,10 +89,26 @@ function initialState(project: Project) {
   const map: Record<string, SceneState> = {};
   for (const s of project.scenes) {
     const p = inferScenePipelinePhases(s, project.status);
+    let video = p.video;
+    let shotVideos: Record<string, ScenePipelinePhase> | undefined;
+
+    // Multi-shot scenes: derive the video pill from per-shot videoKeys /
+    // statuses, because `scenes.video_key` is always null for them so
+    // `inferScenePipelinePhases` would otherwise show 'idle' even after
+    // every shot has rendered.
+    if (s.multiShotEnabled && s.shots && s.shots.length > 0) {
+      shotVideos = {};
+      for (const sh of s.shots) {
+        shotVideos[sh.id] = deriveShotVideo(sh, project.status);
+      }
+      video = aggregateShotVideos(shotVideos);
+    }
+
     map[s.id] = {
       image: p.image,
       voice: p.voice,
-      video: p.video,
+      video,
+      ...(shotVideos ? { shotVideos } : {}),
       ...(p.pipelineError ? { error: p.pipelineError } : {}),
     };
   }
@@ -114,8 +170,63 @@ export function StatusStream({ project }: { project: Project }) {
         setStatus((prev) =>
           payload.status === 'started' ? 'generating' : prev
         );
+        if (payload.status === 'started') {
+          // Immediately reflect "work is happening" on every scene whose
+          // video isn't already done. Without this, multi-shot scenes
+          // sit at 'idle' until their first per-shot event arrives a few
+          // seconds later -- which made step 4 look frozen.
+          setSceneMap((prev) => {
+            const next: Record<string, SceneState> = {};
+            for (const [sceneId, st] of Object.entries(prev)) {
+              if (st.video === 'complete' || st.video === 'failed') {
+                next[sceneId] = st;
+                continue;
+              }
+              let shotVideos: Record<string, ScenePipelinePhase> | undefined;
+              if (st.shotVideos) {
+                shotVideos = {};
+                for (const [id, v] of Object.entries(st.shotVideos)) {
+                  shotVideos[id] = v === 'complete' || v === 'failed' ? v : 'running';
+                }
+              }
+              next[sceneId] = {
+                ...st,
+                video: 'running',
+                ...(shotVideos ? { shotVideos } : {}),
+              };
+            }
+            return next;
+          });
+          setAssembly((prev) =>
+            prev === 'complete' || prev === 'failed' ? prev : 'idle'
+          );
+        }
+      } else if (payload.phase === 'shot-video' && payload.sceneId && payload.shotId) {
+        // Multi-shot scene: per-shot video event. Update the shot's pill
+        // and recompute the aggregate `video` pill from all shots in
+        // that scene. Without this, multi-shot scenes look stuck at
+        // 'idle' on the status table even while shots are rendering.
+        const sceneId = payload.sceneId as string;
+        const shotId = payload.shotId as string;
+        const next = payload.status as ScenePipelinePhase;
+        setSceneMap((prev) => {
+          const cur =
+            prev[sceneId] || { image: 'idle', voice: 'idle', video: 'idle' };
+          const shotVideos = { ...(cur.shotVideos || {}) };
+          shotVideos[shotId] = next;
+          return {
+            ...prev,
+            [sceneId]: {
+              ...cur,
+              shotVideos,
+              video: aggregateShotVideos(shotVideos),
+              error:
+                next === 'failed' && payload.error ? payload.error : cur.error,
+            },
+          };
+        });
       } else if (payload.sceneId) {
-        const phaseKey = payload.phase as keyof SceneState;
+        const phaseKey = payload.phase as 'image' | 'voice' | 'video';
         if (PHASES.some((p) => p.key === phaseKey)) {
           setSceneMap((prev) => ({
             ...prev,
@@ -197,6 +308,12 @@ export function StatusStream({ project }: { project: Project }) {
                     <div className="text-[11px] text-ink-200/70 truncate max-w-[20rem]">
                       {scene.voiceoverText}
                     </div>
+                    {scene.multiShotEnabled && st.shotVideos && (
+                      <MultiShotShotProgress
+                        shots={scene.shots ?? []}
+                        states={st.shotVideos}
+                      />
+                    )}
                     {st.error && (
                       <div className="mt-2 max-w-[28rem] rounded-lg border border-rose-400/25 bg-rose-500/[0.08] px-2.5 py-1.5 text-[11px] leading-snug text-rose-100/95">
                         {st.error}
@@ -262,6 +379,60 @@ function PhasePill({ value }: { value: ScenePipelinePhase }) {
       <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
       {value}
     </span>
+  );
+}
+
+/**
+ * Inline per-shot progress for a multi-shot scene. Renders a row of small
+ * pills (one per shot) below the scene description so the user can see
+ * exactly which shots are still in flight, completed, or failed --
+ * instead of staring at a single 'idle' Video pill for the whole scene.
+ */
+function MultiShotShotProgress({
+  shots,
+  states,
+}: {
+  shots: SceneShot[];
+  states: Record<string, ScenePipelinePhase>;
+}) {
+  if (shots.length === 0) return null;
+  const total = shots.length;
+  const done = shots.filter((sh) => states[sh.id] === 'complete').length;
+  const failed = shots.some((sh) => states[sh.id] === 'failed');
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <span className="text-[10px] uppercase tracking-wider text-ink-200/55">
+        Shots {done}/{total}
+        {failed ? ' · partial failure' : ''}
+      </span>
+      {shots.map((sh, i) => {
+        const v = states[sh.id] || 'idle';
+        const tone =
+          v === 'complete'
+            ? 'bg-emerald-400/15 text-emerald-200 border-emerald-400/25'
+            : v === 'failed'
+              ? 'bg-rose-500/15 text-rose-200 border-rose-500/25'
+              : v === 'running' ||
+                  v === 'queued' ||
+                  v === 'polling' ||
+                  v === 'submitting' ||
+                  v === 'requeued'
+                ? 'bg-brand-400/15 text-brand-100 border-brand-400/25'
+                : 'bg-white/[0.04] text-ink-200/70 border-white/10';
+        const locked = isLockedShot(sh);
+        return (
+          <span
+            key={sh.id}
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${tone}`}
+            title={`Shot ${i + 1} · ${sh.role}${locked ? ' · approved image' : ''} — ${v}`}
+          >
+            <span className="h-1 w-1 rounded-full bg-current opacity-80" />
+            {i + 1}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 

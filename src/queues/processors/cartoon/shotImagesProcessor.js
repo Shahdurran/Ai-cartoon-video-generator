@@ -123,6 +123,26 @@ module.exports = async function shotImagesProcessor(job) {
   const project = await projectRepo.findById(projectId);
   if (!project) throw new Error(`Project ${projectId} not found`);
 
+  // Locked shots reuse the scene's approved variant. Make sure that bond
+  // is current and mark the shot ready, then advance the project-level
+  // gate. We never call the image model for these.
+  if (shotRepo.isLockedShot(shot)) {
+    if (scene.selectedImageId) {
+      await shotRepo.updateSelectedImage(shotId, scene.selectedImageId);
+    }
+    await shotRepo.updateStatus(shotId, 'image-ready', null, null);
+    await pubsub.publish(projectId, {
+      sceneId,
+      shotId,
+      phase: 'shot-image',
+      status: 'complete',
+      variantCount: 0,
+      reusedApprovedSceneImage: true,
+    });
+    await maybeMarkShotImagesReady(projectId);
+    return { shotId, variantCount: 0, reusedApprovedSceneImage: true };
+  }
+
   const style = project.styleId ? await styleRepo.findById(project.styleId) : null;
   const prompt = customPrompt || shot.imagePrompt;
   const otherScenes = await sceneRepo.findByProject(projectId);

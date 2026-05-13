@@ -232,12 +232,23 @@ function SceneVideoCard({
   const shots = scene.shots ?? [];
   const isMultiShot = scene.multiShotEnabled && shots.length > 0;
 
-  // For single-shot scenes the existing `videoSignedUrl` drives the
-  // preview. For multi-shot scenes we play the FIRST shot in the main
-  // preview slot and offer per-shot retry/preview below.
-  const previewUrl = isMultiShot
-    ? shots.find((sh) => !!sh.videoSignedUrl)?.videoSignedUrl || null
-    : scene.videoSignedUrl;
+  // Local (unsaved) shot order shared between the stitched preview and
+  // the reorder strip below. Null means "use the server's order"; once
+  // the user moves a shot we switch to a concrete array and the preview
+  // re-stitches in that order so they can play the new edit before
+  // committing it via the strip's Save button.
+  const [localOrder, setLocalOrder] = useState<string[] | null>(null);
+  const serverOrderIds = useMemo(
+    () =>
+      shots
+        .slice()
+        .sort((a, b) => a.shotIndex - b.shotIndex)
+        .map((sh) => sh.id),
+    [shots]
+  );
+  useEffect(() => {
+    setLocalOrder(null);
+  }, [serverOrderIds.join('|')]);
 
   // For multi-shot scenes the per-scene `phase` map never receives
   // events (the backend emits 'shot-video' instead), so it stays at the
@@ -246,7 +257,13 @@ function SceneVideoCard({
     ? deriveMultiShotPhase(scene)
     : phase;
 
-  const isReady = !!previewUrl && (effectivePhase === 'complete' || effectivePhase === 'partial');
+  const previewUrl = isMultiShot
+    ? null
+    : scene.videoSignedUrl;
+
+  const isReady = isMultiShot
+    ? effectivePhase === 'complete' || effectivePhase === 'partial'
+    : !!previewUrl && (effectivePhase === 'complete' || effectivePhase === 'partial');
   const isFailed =
     effectivePhase === 'failed' ||
     (!isMultiShot && !isSceneVideoReady(scene) && scene.status === 'failed');
@@ -272,51 +289,59 @@ function SceneVideoCard({
         <PhasePill phase={effectivePhase} />
       </div>
 
-      <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-white/10 bg-black/40 mb-3">
-        {isReady && previewUrl && (
-          <video
-            ref={videoRef}
-            src={previewUrl}
-            controls
-            preload="metadata"
-            className="h-full w-full object-contain"
-          />
-        )}
-        {isRendering && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-xs text-ink-100/70">
-            <div
-              className="mb-2 h-8 w-8 rounded-full animate-glow"
-              style={{
-                backgroundImage:
-                  'linear-gradient(135deg, #FFA846 0%, #FF4689 100%)',
-              }}
+      {isMultiShot ? (
+        <StitchedShotPreview
+          scene={scene}
+          localOrder={localOrder}
+          isFailed={isFailed}
+          isRendering={isRendering}
+          failureNote={failureNote || null}
+          partial={effectivePhase === 'partial'}
+        />
+      ) : (
+        <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-white/10 bg-black/40 mb-3">
+          {isReady && previewUrl && (
+            <video
+              ref={videoRef}
+              src={previewUrl}
+              controls
+              preload="metadata"
+              className="h-full w-full object-contain"
             />
-            Rendering with Seedance…
-          </div>
-        )}
-        {isFailed && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-xs text-rose-200/90 px-4 text-center">
-            <div className="font-medium mb-1">Render failed</div>
-            <div className="text-[11px] text-rose-200/70 line-clamp-3">
-              {failureNote || 'Seedance returned an error.'}
+          )}
+          {isRendering && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-xs text-ink-100/70">
+              <div
+                className="mb-2 h-8 w-8 rounded-full animate-glow"
+                style={{
+                  backgroundImage:
+                    'linear-gradient(135deg, #FFA846 0%, #FF4689 100%)',
+                }}
+              />
+              Rendering with Seedance…
             </div>
-          </div>
-        )}
-        {!isFailed && !isReady && effectivePhase === 'partial' && (
-          <div className="absolute inset-x-0 bottom-0 bg-amber-500/15 px-3 py-1.5 text-[10px] text-amber-100/90 text-center border-t border-amber-400/20">
-            One shot failed — pick a different image variant or regenerate.
-          </div>
-        )}
-      </div>
+          )}
+          {isFailed && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-xs text-rose-200/90 px-4 text-center">
+              <div className="font-medium mb-1">Render failed</div>
+              <div className="text-[11px] text-rose-200/70 line-clamp-3">
+                {failureNote || 'Seedance returned an error.'}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="text-[11px] text-ink-200/70 line-clamp-2 mb-3" title={scene.voiceoverText}>
         {scene.voiceoverText}
       </div>
 
       {isMultiShot ? (
-        <ShotRetryStrip
+        <ShotOrderStrip
           projectId={projectId}
           scene={scene}
+          localOrder={localOrder}
+          onLocalOrderChange={setLocalOrder}
           onChanged={onShotChanged}
         />
       ) : (
@@ -336,35 +361,268 @@ function SceneVideoCard({
       )}
       {isMultiShot && (
         <p className="mt-2 text-[10px] text-ink-100/50 text-center">
-          Final cut cross-cuts between these shots with continuous voiceover.
+          Final cut stitches shots in the order shown, with continuous voiceover.
         </p>
       )}
     </div>
   );
 }
 
-function ShotRetryStrip({
+/**
+ * Plays a multi-shot scene as a continuous stitched preview by chaining
+ * the shot videos in their current `shotIndex` order. When a clip ends
+ * we advance to the next ready shot; failed/missing shots are skipped
+ * with a brief on-screen note so the user still gets a coherent preview
+ * of the takes that DID render. This mirrors what final assembly will
+ * concat together, so the order shown here matches the final cut order.
+ */
+function StitchedShotPreview({
+  scene,
+  localOrder,
+  isFailed,
+  isRendering,
+  failureNote,
+  partial,
+}: {
+  scene: Scene;
+  localOrder: string[] | null;
+  isFailed: boolean;
+  isRendering: boolean;
+  failureNote: string | null;
+  partial: boolean;
+}) {
+  const shots = scene.shots ?? [];
+  const orderedShots = useMemo(() => {
+    if (!localOrder) {
+      return shots.slice().sort((a, b) => a.shotIndex - b.shotIndex);
+    }
+    const byId = new Map(shots.map((sh) => [sh.id, sh] as const));
+    const out: SceneShot[] = [];
+    for (const id of localOrder) {
+      const sh = byId.get(id);
+      if (sh) out.push(sh);
+    }
+    return out;
+  }, [shots, localOrder]);
+
+  // Only ready shots actually play; ordering carries through from above
+  // so the indices line up with the reorder UI below and previewed cuts
+  // match what final assembly will concatenate.
+  const playableShots = useMemo(
+    () => orderedShots.filter((sh) => !!sh.videoSignedUrl),
+    [orderedShots]
+  );
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [playing, setPlaying] = useState(false);
+
+  // Reset to the start whenever the shot list / order changes server-side.
+  useEffect(() => {
+    setActiveIdx(0);
+    setPlaying(false);
+    const v = videoRef.current;
+    if (v) {
+      v.pause();
+      v.currentTime = 0;
+    }
+  }, [
+    // Re-key on the JOIN of ordered ids so reordering / new renders both reset.
+    playableShots.map((sh) => sh.id).join('|'),
+  ]);
+
+  const current = playableShots[activeIdx] || null;
+
+  function handleEnded() {
+    if (activeIdx + 1 < playableShots.length) {
+      setActiveIdx(activeIdx + 1);
+      // Auto-play the next clip on the next paint.
+      requestAnimationFrame(() => {
+        videoRef.current?.play().catch(() => {});
+      });
+    } else {
+      setPlaying(false);
+    }
+  }
+
+  function playFromStart() {
+    setActiveIdx(0);
+    requestAnimationFrame(() => {
+      const v = videoRef.current;
+      if (!v) return;
+      v.currentTime = 0;
+      v.play().catch(() => {});
+    });
+  }
+
+  const showOverlay = !current || (isRendering && playableShots.length === 0);
+
+  return (
+    <div className="mb-3">
+      <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-white/10 bg-black/40">
+        {current && (
+          // eslint-disable-next-line jsx-a11y/media-has-caption
+          <video
+            key={current.id}
+            ref={videoRef}
+            src={current.videoSignedUrl!}
+            preload="metadata"
+            playsInline
+            onEnded={handleEnded}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            className="h-full w-full object-contain"
+          />
+        )}
+        {showOverlay && isRendering && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-xs text-ink-100/70">
+            <div
+              className="mb-2 h-8 w-8 rounded-full animate-glow"
+              style={{
+                backgroundImage:
+                  'linear-gradient(135deg, #FFA846 0%, #FF4689 100%)',
+              }}
+            />
+            Rendering shots…
+          </div>
+        )}
+        {isFailed && playableShots.length === 0 && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-xs text-rose-200/90 px-4 text-center">
+            <div className="font-medium mb-1">All shots failed</div>
+            <div className="text-[11px] text-rose-200/70 line-clamp-3">
+              {failureNote || 'Seedance returned errors for every shot.'}
+            </div>
+          </div>
+        )}
+        {current && (
+          <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-black/60 px-2 py-0.5 text-[10px] text-white/85">
+            Shot {playableShots.findIndex((sh) => sh.id === current.id) + 1}
+            <span className="ml-1 text-white/60">/ {playableShots.length}</span>
+            <span className="ml-2 uppercase tracking-wider text-white/55">
+              {current.role}
+            </span>
+          </div>
+        )}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              const v = videoRef.current;
+              if (!v) return;
+              if (v.paused) v.play().catch(() => {});
+              else v.pause();
+            }}
+            disabled={!current}
+            className="btn-ghost !px-2.5 !py-1 !text-[11px]"
+            title="Play / pause the current shot"
+          >
+            {playing ? 'Pause' : 'Play'}
+          </button>
+          <button
+            type="button"
+            onClick={playFromStart}
+            disabled={playableShots.length === 0}
+            className="btn-ghost !px-2.5 !py-1 !text-[11px]"
+            title="Preview the stitched scene from the first shot"
+          >
+            Preview stitched
+          </button>
+        </div>
+        {partial && (
+          <span className="text-[10px] text-amber-100/85">
+            Some shots failed — preview skips them.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Per-scene shot ordering + retry strip. Each row shows a thumbnail of
+ * the rendered shot, its role, move-up / move-down handles, and a Redo
+ * button. The user can rearrange shots locally and either preview the
+ * new order in the stitched player above or persist it to the backend
+ * via `api.reorderShots`; saved order is what final assembly will
+ * concatenate.
+ */
+function ShotOrderStrip({
   projectId,
   scene,
+  localOrder,
+  onLocalOrderChange,
   onChanged,
 }: {
   projectId: string;
   scene: Scene;
+  localOrder: string[] | null;
+  onLocalOrderChange: (next: string[] | null) => void;
   onChanged: () => void;
 }) {
   const [busyShot, setBusyShot] = useState<string | null>(null);
-  const shots = scene.shots ?? [];
-  const anyFailed = shots.some(
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const serverShots = useMemo(
+    () => (scene.shots ?? []).slice().sort((a, b) => a.shotIndex - b.shotIndex),
+    [scene.shots]
+  );
+  const serverIds = useMemo(() => serverShots.map((sh) => sh.id), [serverShots]);
+
+  const order = localOrder ?? serverIds;
+  const shotById = useMemo(() => {
+    const m = new Map<string, SceneShot>();
+    for (const sh of serverShots) m.set(sh.id, sh);
+    return m;
+  }, [serverShots]);
+  const orderedShots = order
+    .map((id) => shotById.get(id))
+    .filter((sh): sh is SceneShot => !!sh);
+
+  const dirty =
+    localOrder != null &&
+    localOrder.some((id, i) => serverIds[i] !== id);
+
+  const everyReady = orderedShots.every((sh) => !!sh.videoSignedUrl);
+  const reorderAllowed = orderedShots.length >= 2 && everyReady;
+  const anyFailed = orderedShots.some(
     (sh) => sh.status === 'failed' && !sh.videoKey
   );
 
+  function move(idx: number, delta: number) {
+    const next = order.slice();
+    const target = idx + delta;
+    if (target < 0 || target >= next.length) return;
+    [next[idx], next[target]] = [next[target], next[idx]];
+    onLocalOrderChange(next);
+  }
+
   async function regen(shot: SceneShot) {
+    setError(null);
     setBusyShot(shot.id);
     try {
       await api.regenerateShotVideo(projectId, scene.id, shot.id);
       await onChanged();
+    } catch (err: any) {
+      setError(err?.message || 'Regenerate failed');
     } finally {
       setBusyShot(null);
+    }
+  }
+
+  async function saveOrder() {
+    if (!localOrder) return;
+    setError(null);
+    setSavingOrder(true);
+    try {
+      await api.reorderShots(projectId, scene.id, localOrder);
+      await onChanged();
+      onLocalOrderChange(null);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to save order');
+    } finally {
+      setSavingOrder(false);
     }
   }
 
@@ -384,55 +642,128 @@ function ShotRetryStrip({
           </Link>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-1.5">
-      {shots.map((shot) => {
-        const ready = !!shot.videoSignedUrl;
-        const failed = shot.status === 'failed' && !shot.videoKey;
-        return (
-          <div
-            key={shot.id}
-            className="relative aspect-video overflow-hidden rounded-lg border border-white/10 bg-black/40"
-          >
-            {ready ? (
-              // eslint-disable-next-line jsx-a11y/media-has-caption
-              <video
-                src={shot.videoSignedUrl!}
-                muted
-                playsInline
-                preload="metadata"
-                className="h-full w-full object-cover"
-                onMouseEnter={(e) => (e.currentTarget as HTMLVideoElement).play().catch(() => {})}
-                onMouseLeave={(e) => {
-                  const v = e.currentTarget as HTMLVideoElement;
-                  v.pause();
-                  v.currentTime = 0;
-                }}
-              />
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center text-[10px] text-ink-100/55">
-                {failed ? 'failed' : 'rendering…'}
+      {error && (
+        <div className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-2.5 py-1.5 text-[10px] text-rose-200">
+          {error}
+        </div>
+      )}
+
+      <ol className="space-y-1.5">
+        {orderedShots.map((shot, i) => {
+          const ready = !!shot.videoSignedUrl;
+          const failed = shot.status === 'failed' && !shot.videoKey;
+          return (
+            <li
+              key={shot.id}
+              className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] p-1.5"
+            >
+              <span className="w-5 shrink-0 text-center text-[11px] font-medium text-ink-100/70">
+                {i + 1}
+              </span>
+              <div className="relative h-12 w-20 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/40">
+                {ready ? (
+                  // eslint-disable-next-line jsx-a11y/media-has-caption
+                  <video
+                    src={shot.videoSignedUrl!}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    className="h-full w-full object-cover"
+                    onMouseEnter={(e) =>
+                      (e.currentTarget as HTMLVideoElement).play().catch(() => {})
+                    }
+                    onMouseLeave={(e) => {
+                      const v = e.currentTarget as HTMLVideoElement;
+                      v.pause();
+                      v.currentTime = 0;
+                    }}
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center text-[9px] text-ink-100/60">
+                    {failed ? 'failed' : 'rendering…'}
+                  </div>
+                )}
               </div>
-            )}
-            <div className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-white/80">
-              {shot.role}
-            </div>
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="text-[10px] uppercase tracking-wider text-ink-100/70">
+                  {shot.role}
+                </span>
+                <span className="text-[10px] text-ink-100/45">
+                  {Number(shot.durationSeconds || 0).toFixed(1)}s
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => move(i, -1)}
+                  disabled={i === 0 || !reorderAllowed || savingOrder}
+                  className="rounded-md border border-white/10 px-1.5 py-0.5 text-[11px] text-ink-100/80 hover:border-white/25 hover:text-white disabled:opacity-30"
+                  title="Move shot earlier in the cut"
+                  aria-label="Move shot up"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => move(i, 1)}
+                  disabled={
+                    i === orderedShots.length - 1 ||
+                    !reorderAllowed ||
+                    savingOrder
+                  }
+                  className="rounded-md border border-white/10 px-1.5 py-0.5 text-[11px] text-ink-100/80 hover:border-white/25 hover:text-white disabled:opacity-30"
+                  title="Move shot later in the cut"
+                  aria-label="Move shot down"
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => regen(shot)}
+                  disabled={busyShot === shot.id || savingOrder}
+                  className="ml-1 rounded-md border border-white/10 px-2 py-0.5 text-[10px] text-ink-100/80 hover:border-white/25 hover:text-white disabled:opacity-40"
+                  title={
+                    failed
+                      ? 'Re-run Seedance. If it keeps failing, pick a different image variant on the cinematic shots step.'
+                      : 'Re-run Seedance for this shot'
+                  }
+                >
+                  {busyShot === shot.id ? '…' : 'Redo'}
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+
+      {reorderAllowed && (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-ink-100/55">
+            {dirty
+              ? 'Preview above reflects new order. Save to apply to the final cut.'
+              : 'Use ↑↓ to rearrange — the stitched preview matches the final cut order.'}
+          </span>
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => regen(shot)}
-              disabled={busyShot === shot.id}
-              className="absolute right-1 bottom-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] text-white/80 hover:bg-black/80 disabled:opacity-50"
-              title={
-                failed
-                  ? 'Re-run Seedance. If it keeps failing, pick a different image variant on the cinematic shots step.'
-                  : 'Re-run Seedance for this shot'
-              }
+              onClick={() => onLocalOrderChange(null)}
+              disabled={!dirty || savingOrder}
+              className="btn-ghost !px-2 !py-1 !text-[11px]"
             >
-              {busyShot === shot.id ? '…' : 'Redo'}
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={saveOrder}
+              disabled={!dirty || savingOrder}
+              className="btn-ghost !px-2 !py-1 !text-[11px]"
+              title="Persist this shot order so final assembly uses it"
+            >
+              {savingOrder ? 'Saving…' : 'Save order'}
             </button>
           </div>
-        );
-      })}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

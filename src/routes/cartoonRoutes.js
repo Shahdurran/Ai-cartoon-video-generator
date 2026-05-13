@@ -118,6 +118,10 @@ router.put(
   '/projects/:id/scenes/:sceneId/shots',
   projectController.replaceShots
 );
+router.put(
+  '/projects/:id/scenes/:sceneId/shots/order',
+  projectController.reorderShots
+);
 router.post('/projects/:id/approve-shots', projectController.approveShots);
 router.patch(
   '/projects/:id/scenes/:sceneId/shots/:shotId/select-image',

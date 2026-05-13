@@ -57,6 +57,18 @@ export type SuggestedShot = {
   imagePrompt: string;
 };
 
+/**
+ * Sentinel stored in `scene_shots.image_prompt` for "locked" shots whose
+ * image is the parent scene's approved variant (kept from the Images step)
+ * rather than newly generated. Mirrors `USE_APPROVED_SCENE_IMAGE_MARKER`
+ * in `src/db/repositories/shotRepo.js`.
+ */
+export const USE_APPROVED_SCENE_IMAGE_MARKER = '__use_approved_scene_image__';
+
+export function isLockedShot(shot: { imagePrompt: string }): boolean {
+  return shot.imagePrompt === USE_APPROVED_SCENE_IMAGE_MARKER;
+}
+
 export type SceneShot = {
   id: string;
   sceneId: string;
@@ -605,11 +617,27 @@ export const api = {
   replaceShots: (
     projectId: string,
     sceneId: string,
-    shots: Array<{ role: SuggestedShot['role']; imagePrompt: string; durationSeconds?: number }>
+    shots: Array<{
+      role: SuggestedShot['role'];
+      imagePrompt: string;
+      durationSeconds?: number;
+      /** When true, this shot reuses the scene's approved variant instead
+       *  of generating new images. `imagePrompt` is ignored server-side. */
+      useApprovedSceneImage?: boolean;
+    }>
   ) =>
     request<{ shots: SceneShot[] }>(
       `/api/projects/${projectId}/scenes/${sceneId}/shots`,
       { method: 'PUT', body: JSON.stringify({ shots }) }
+    ),
+
+  /** Re-order the shots inside one multi-shot scene without re-rendering.
+   *  Used by the scene-videos step to rearrange already-rendered shots
+   *  before final assembly stitches them in `shot_index` order. */
+  reorderShots: (projectId: string, sceneId: string, orderedShotIds: string[]) =>
+    request<{ shots: SceneShot[] }>(
+      `/api/projects/${projectId}/scenes/${sceneId}/shots/order`,
+      { method: 'PUT', body: JSON.stringify({ orderedShotIds }) }
     ),
 
   /** Approve the project's shot list -> kick off per-shot image generation
