@@ -13,6 +13,7 @@ const cartoonImage = require('../../../services/cartoonImageService');
 const sceneRepo = require('../../../db/repositories/sceneRepo');
 const sceneImageRepo = require('../../../db/repositories/sceneImageRepo');
 const projectRepo = require('../../../db/repositories/projectRepo');
+const projectVisualReferenceRepo = require('../../../db/repositories/projectVisualReferenceRepo');
 const styleRepo = require('../../../db/repositories/styleRepo');
 const r2Service = require('../../../services/r2Service');
 const pubsub = require('../../../services/pubsubService');
@@ -129,6 +130,17 @@ module.exports = async function sceneImagesProcessor(job) {
 
     const productReferenceUrl = await resolvePublicishUrl(scene.productReferenceKey);
 
+    // Project-level character reference images (Step 1 uploads). Sent to
+    // Fal as additional `image_urls` on nano-banana-2/edit so generated
+    // scenes inherit the user's chosen character / aesthetic. Cap at 4
+    // to keep the request payload sane.
+    const visualReferenceRows = await projectVisualReferenceRepo.findByProject(projectId);
+    const characterReferenceUrls = [];
+    for (const ref of visualReferenceRows.slice(0, 4)) {
+      const url = await resolvePublicishUrl(ref.r2Key);
+      if (url) characterReferenceUrls.push(url);
+    }
+
     let productCustomReferenceId = scene.productCustomReferenceId || null;
     if (
       productReferenceUrl &&
@@ -157,6 +169,7 @@ module.exports = async function sceneImagesProcessor(job) {
       imageModelSettings: project.imageModelSettings || {},
       productReferenceUrl,
       productCustomReferenceId,
+      characterReferenceUrls,
       characterConsistency,
     });
 

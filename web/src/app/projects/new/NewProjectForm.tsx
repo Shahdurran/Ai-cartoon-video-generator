@@ -32,7 +32,9 @@ export function NewProjectForm({ styles }: Props) {
   /** Display name for the project when rewriting from an existing script (stored as `topic` in the API). */
   const [videoTitle, setVideoTitle] = useState('');
   const [sourceScript, setSourceScript] = useState('');
-  const [styleId, setStyleId] = useState(styles[0]?.id || '');
+  // Style is optional: start unselected so the user makes a deliberate
+  // choice between a preset and visual direction (or both).
+  const [styleId, setStyleId] = useState<string>('');
   const [sceneCount, setSceneCount] = useState(5);
   const [totalDurationSeconds, setTotalDurationSeconds] = useState<number | ''>(30);
   const [tone, setTone] = useState('dramatic');
@@ -93,14 +95,25 @@ export function NewProjectForm({ styles }: Props) {
     setRefsError(null);
   }
 
+  const hasVisualNotes = visualNotes.trim().length > 0;
+  const hasVisualRefs = visualRefs.length > 0;
+  /** Server requires at least ONE of: style preset, reference image, or
+   *  visual notes -- otherwise Claude/Fal have nothing to anchor the
+   *  visuals on. We mirror that gate client-side for instant feedback. */
+  const hasVisualAnchor = Boolean(styleId) || hasVisualRefs || hasVisualNotes;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!styleId) return setError('Please choose a style');
     if (mode === 'topic' && !topic.trim()) return setError('Topic is required');
     if (mode === 'rewrite') {
       if (!videoTitle.trim()) return setError('Video title is required');
       if (!sourceScript.trim()) return setError('Source script is required');
+    }
+    if (!hasVisualAnchor) {
+      return setError(
+        'Pick a style OR add visual direction (a reference image or notes) so we have something to anchor the visuals on.'
+      );
     }
 
     setSubmitting(true);
@@ -110,7 +123,7 @@ export function NewProjectForm({ styles }: Props) {
         // Topic mode: the topic textarea is both the idea and the stored title.
         topic: mode === 'topic' ? topic : videoTitle.trim(),
         sourceScript: mode === 'rewrite' ? sourceScript : undefined,
-        styleId,
+        styleId: styleId || undefined,
         sceneCount,
         totalDurationSeconds:
           typeof totalDurationSeconds === 'number' ? totalDurationSeconds : undefined,
@@ -187,65 +200,97 @@ export function NewProjectForm({ styles }: Props) {
       </section>
 
       <section className="animate-fade-up stagger-1">
-        <SectionHeader step="2" title="Pick a style" />
+        <SectionHeader step="2" title="Pick a style (optional)" />
+        <p className="text-[12px] text-ink-200/70 -mt-2 mb-3 max-w-2xl">
+          Picks a baseline art style appended to every image prompt. Skip this
+          if you&rsquo;re providing your own reference images / visual notes in
+          step 3 — you need <span className="text-white">at least one</span>{' '}
+          of the two.
+        </p>
         {styles.length === 0 ? (
           <div className="text-sm text-rose-300">
             No styles configured. Run <code>npm run seed</code> on the backend.
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {styles.map((s, i) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setStyleId(s.id)}
-                className={`group text-left rounded-2xl border p-3 transition animate-fade-up ${
-                  styleId === s.id
-                    ? 'border-brand-400/60 bg-white/[0.08] shadow-glass'
-                    : 'border-white/10 bg-white/[0.03] hover:border-white/25 hover:bg-white/[0.06]'
-                }`}
-                style={{ animationDelay: `${i * 40}ms` }}
-              >
-                <div
-                  className="aspect-video w-full rounded-xl mb-2 bg-center bg-cover relative overflow-hidden"
-                  style={
-                    s.thumbnailUrl
-                      ? { backgroundImage: `url(${s.thumbnailUrl})` }
-                      : {
-                          backgroundImage:
-                            'linear-gradient(135deg, rgba(255,168,70,0.3), rgba(255,70,137,0.3))',
-                        }
-                  }
+            {styles.map((s, i) => {
+              const selected = styleId === s.id;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setStyleId(selected ? '' : s.id)}
+                  className={`group text-left rounded-2xl border p-3 transition animate-fade-up ${
+                    selected
+                      ? 'border-brand-400/60 bg-white/[0.08] shadow-glass'
+                      : 'border-white/10 bg-white/[0.03] hover:border-white/25 hover:bg-white/[0.06]'
+                  }`}
+                  style={{ animationDelay: `${i * 40}ms` }}
+                  aria-pressed={selected}
+                  title={selected ? 'Click to remove this style' : `Pick ${s.name}`}
                 >
-                  {styleId === s.id && (
-                    <span className="absolute inset-0 ring-2 ring-brand-400/60 rounded-xl" />
-                  )}
-                </div>
-                <div className="text-sm font-medium text-white">{s.name}</div>
-              </button>
-            ))}
+                  <div
+                    className="aspect-video w-full rounded-xl mb-2 bg-center bg-cover relative overflow-hidden"
+                    style={
+                      s.thumbnailUrl
+                        ? { backgroundImage: `url(${s.thumbnailUrl})` }
+                        : {
+                            backgroundImage:
+                              'linear-gradient(135deg, rgba(255,168,70,0.3), rgba(255,70,137,0.3))',
+                          }
+                    }
+                  >
+                    {selected && (
+                      <span className="absolute inset-0 ring-2 ring-brand-400/60 rounded-xl" />
+                    )}
+                  </div>
+                  <div className="text-sm font-medium text-white">{s.name}</div>
+                </button>
+              );
+            })}
           </div>
+        )}
+        {styleId && (
+          <button
+            type="button"
+            onClick={() => setStyleId('')}
+            className="mt-3 text-[11px] text-ink-200/70 underline hover:text-white"
+          >
+            Clear style — rely on visual direction only
+          </button>
         )}
       </section>
 
       <section className="animate-fade-up stagger-2">
         <SectionHeader
           step="3"
-          title="Visual direction (optional)"
+          title={`Visual direction${styleId ? ' (optional)' : ''}`}
         />
         <p className="text-[12px] text-ink-200/70 -mt-2 mb-3 max-w-2xl">
           Upload <span className="text-white">reference images</span> (character art, packshot, mood board)
-          and/or describe the <span className="text-white">character traits & visual style</span> you want — Claude will
-          read these and bake them into every scene&rsquo;s image prompt. Everything here is optional;
-          the style preset above still applies on top.
+          and/or describe the <span className="text-white">character traits & visual style</span> you want.
+          Claude reads them when authoring scene prompts <em>and</em> we send the images
+          back to Fal as <span className="text-white">image-to-image references</span> so the
+          generated characters actually look like your reference.
+          {styleId
+            ? ' The style preset above still applies on top.'
+            : ' Required when no style preset is picked.'}
         </p>
+
+        {!styleId && !hasVisualRefs && !hasVisualNotes && (
+          <div className="mb-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100">
+            You haven&rsquo;t picked a style. Add at least one reference image
+            <em> or</em> some visual notes here to give Claude / Fal a look to anchor on.
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="space-y-2">
             <span className="label block">Reference images</span>
             <p className="text-[11px] text-ink-200/65">
               Up to {MAX_VISUAL_REFS} images (PNG/JPG/WebP, 8MB each). Used by Claude as the
-              canonical look for the main character.
+              canonical look for the main character <span className="text-white">and</span> sent to
+              Fal&rsquo;s edit endpoint as the image-to-image reference for every generated scene.
             </p>
             <div className="grid grid-cols-4 gap-2">
               {visualRefs.map((ref) => (
@@ -395,8 +440,13 @@ export function NewProjectForm({ styles }: Props) {
       <div className="flex justify-end">
         <button
           type="submit"
-          disabled={submitting}
-          className="btn-primary !px-6 !py-3"
+          disabled={submitting || !hasVisualAnchor}
+          title={
+            !hasVisualAnchor
+              ? 'Pick a style or add a reference image / notes first'
+              : undefined
+          }
+          className="btn-primary !px-6 !py-3 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {submitting ? 'Writing your script…' : 'Generate script'}
         </button>

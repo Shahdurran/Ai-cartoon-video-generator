@@ -397,7 +397,9 @@ export const api = {
   createProject: (body: {
     topic?: string;
     sourceScript?: string;
-    styleId: string;
+    /** Optional. If omitted, the user must supply visual direction
+     *  (`visualNotes` and/or `visualReferenceKeys`) — server enforces. */
+    styleId?: string;
     sceneCount: number;
     voiceId?: string;
     voiceSettings?: VoiceSettings;

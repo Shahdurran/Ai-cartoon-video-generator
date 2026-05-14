@@ -14,6 +14,7 @@ const cartoonImage = require('../../../services/cartoonImageService');
 const sceneRepo = require('../../../db/repositories/sceneRepo');
 const sceneImageRepo = require('../../../db/repositories/sceneImageRepo');
 const projectRepo = require('../../../db/repositories/projectRepo');
+const projectVisualReferenceRepo = require('../../../db/repositories/projectVisualReferenceRepo');
 const styleRepo = require('../../../db/repositories/styleRepo');
 const shotRepo = require('../../../db/repositories/shotRepo');
 const r2Service = require('../../../services/r2Service');
@@ -162,6 +163,17 @@ module.exports = async function shotImagesProcessor(job) {
     }
 
     const productReferenceUrl = await resolvePublicishUrl(scene.productReferenceKey);
+
+    // Project-level character reference images (Step 1 uploads). Same
+    // anchor used by sceneImagesProcessor so the multi-shot variants
+    // match the single-shot scene image they were carved out of.
+    const visualReferenceRows = await projectVisualReferenceRepo.findByProject(projectId);
+    const characterReferenceUrls = [];
+    for (const ref of visualReferenceRows.slice(0, 4)) {
+      const url = await resolvePublicishUrl(ref.r2Key);
+      if (url) characterReferenceUrls.push(url);
+    }
+
     let productCustomReferenceId = scene.productCustomReferenceId || null;
 
     if (
@@ -194,6 +206,7 @@ module.exports = async function shotImagesProcessor(job) {
       imageModelSettings: project.imageModelSettings || {},
       productReferenceUrl,
       productCustomReferenceId,
+      characterReferenceUrls,
       characterConsistency,
       r2KeyBuilder: (variantIndex, ext) =>
         r2Service.keys.shotImage(projectId, sceneId, shotId, variantIndex, ext),

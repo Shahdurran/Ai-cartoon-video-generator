@@ -207,19 +207,33 @@ async function create(req, res, next) {
     if (!topic && !sourceScript) {
       return res.status(400).json({ error: 'Either topic or sourceScript is required' });
     }
-    if (!styleId) {
-      return res.status(400).json({ error: 'styleId is required' });
+
+    // styleId is optional, but the user MUST give us something to anchor
+    // the visuals on: a style preset OR at least one reference image OR
+    // some free-text visual direction. Otherwise Claude has nothing to
+    // ground the look in and Flux/Nano-Banana have no character reference.
+    const hasVisualNotes =
+      typeof visualNotes === 'string' && visualNotes.trim().length > 0;
+    const hasVisualRefKeys =
+      Array.isArray(visualReferenceKeys) && visualReferenceKeys.length > 0;
+    if (!styleId && !hasVisualNotes && !hasVisualRefKeys) {
+      return res.status(400).json({
+        error:
+          'Pick a style OR provide visual direction (a reference image or visual notes) before generating.',
+      });
     }
 
-    const style = await styleRepo.findById(styleId);
-    if (!style) return res.status(400).json({ error: `Unknown styleId: ${styleId}` });
+    if (styleId) {
+      const style = await styleRepo.findById(styleId);
+      if (!style) return res.status(400).json({ error: `Unknown styleId: ${styleId}` });
+    }
 
     if (musicTrackId) {
       const track = await musicTrackRepo.findById(musicTrackId);
       if (!track) return res.status(400).json({ error: `Unknown musicTrackId: ${musicTrackId}` });
     }
 
-    if (!Array.isArray(visualReferenceKeys)) {
+    if (visualReferenceKeys && !Array.isArray(visualReferenceKeys)) {
       return res
         .status(400)
         .json({ error: 'visualReferenceKeys must be an array of staged R2 keys' });

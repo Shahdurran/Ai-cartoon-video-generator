@@ -281,7 +281,34 @@ function buildNanoBananaProductRefPrompt(userPrompt) {
   ].join('\n');
 }
 
-async function callNanoBanana({ prompt, aspectRatio, seed, apiKey, nano = {}, productReferenceUrl = null }) {
+/**
+ * Prompt prefix for the project-level character-reference edit flow. Per
+ * the user's New Project upload (step 1), the supplied image(s) define
+ * the canonical look of the main character / art style and MUST be
+ * preserved across every scene. This is functionally the same trick as
+ * `buildNanoBananaProductRefPrompt`, but worded for character identity
+ * rather than packshot fidelity.
+ */
+function buildNanoBananaCharacterRefPrompt(userPrompt) {
+  return [
+    'EDIT TASK: render the scene below while keeping the main character visually consistent with the attached reference image(s).',
+    'The reference(s) define the canonical look of the character / art style — preserve facial structure, hair color & style, skin tone, eye color, age range, build, outfit silhouette, and overall aesthetic.',
+    'Treat the reference(s) as ground truth for the main character. Allow normal variation in pose, camera angle, framing, lighting, and expression as the scene requires.',
+    '',
+    'SCENE PROMPT:',
+    userPrompt,
+  ].join('\n');
+}
+
+async function callNanoBanana({
+  prompt,
+  aspectRatio,
+  seed,
+  apiKey,
+  nano = {},
+  productReferenceUrl = null,
+  characterReferenceUrls = [],
+}) {
   const outFmt = ['jpeg', 'png', 'webp'].includes(nano.output_format) ? nano.output_format : 'png';
   const resStr = NANO_BANANA_RESOLUTIONS.has(nano.resolution) ? nano.resolution : '1K';
   const tol = ['1', '2', '3', '4', '5', '6'].includes(String(nano.safety_tolerance))
@@ -290,13 +317,30 @@ async function callNanoBanana({ prompt, aspectRatio, seed, apiKey, nano = {}, pr
   const ratio = NANO_BANANA_ASPECT_RATIOS.has(aspectRatio) ? aspectRatio : 'auto';
 
   const baseModelId = (nano.imageModelId || 'fal-ai/nano-banana-2').replace(/^\//, '');
-  const canUseProductEdit =
-    Boolean(productReferenceUrl) &&
+  const refUrls = Array.isArray(characterReferenceUrls)
+    ? characterReferenceUrls.filter(Boolean)
+    : [];
+  const hasProductRef = Boolean(productReferenceUrl);
+  const hasAnyRef = hasProductRef || refUrls.length > 0;
+  const canUseEdit =
+    hasAnyRef &&
     (baseModelId === 'fal-ai/nano-banana-2' || baseModelId === 'fal-ai/nano-banana-2/t2i');
-  const endpointId = canUseProductEdit ? 'fal-ai/nano-banana-2/edit' : baseModelId;
-  const promptForModel = canUseProductEdit
-    ? buildNanoBananaProductRefPrompt(prompt)
-    : prompt;
+  const endpointId = canUseEdit ? 'fal-ai/nano-banana-2/edit' : baseModelId;
+
+  // Prompt selection priority: scene-level product reference is the
+  // strongest constraint (it's an actual packshot, must be reproduced
+  // faithfully); project-level character refs are the next strongest;
+  // plain t2i prompt is the fallback. Both edit-prompt builders bake in
+  // the "preserve reference identity" instruction the edit endpoint
+  // needs to actually look at `image_urls`.
+  let promptForModel = prompt;
+  if (canUseEdit) {
+    if (hasProductRef) {
+      promptForModel = buildNanoBananaProductRefPrompt(prompt);
+    } else {
+      promptForModel = buildNanoBananaCharacterRefPrompt(prompt);
+    }
+  }
 
   const body = {
     prompt: promptForModel,
@@ -313,12 +357,20 @@ async function callNanoBanana({ prompt, aspectRatio, seed, apiKey, nano = {}, pr
   if (nano.thinking_level === 'minimal' || nano.thinking_level === 'high') {
     body.thinking_level = nano.thinking_level;
   }
-  if (canUseProductEdit) {
-    body.image_urls = [productReferenceUrl];
-    // Nano Banana 2 Edit tends to drop the product with a single packshot and
-    // loose styling prompt. Reasoning helps it actually place the product, and
-    // 2K gives it room to render the label legibly. Callers can still override
-    // via imageModelSettings.nanoBanana2.
+  if (canUseEdit) {
+    // Order matters for nano-banana-2/edit: the FIRST image is the one
+    // it grounds identity on most strongly. Product packshot leads when
+    // present; otherwise the user's first character reference does.
+    // Cap to 4 total so the request stays small and Fal's rate limits
+    // don't bite -- character refs beyond the cap are unlikely to add
+    // anything the first 3-4 don't.
+    const ordered = hasProductRef
+      ? [productReferenceUrl, ...refUrls]
+      : [...refUrls];
+    body.image_urls = ordered.slice(0, 4);
+    // Edit mode benefits from reasoning + a bigger canvas so the
+    // reference identity / label survives downscaling. Callers can
+    // still override via imageModelSettings.nanoBanana2.
     if (!body.thinking_level) body.thinking_level = 'high';
     if (!nano.resolution) body.resolution = '2K';
   }
@@ -331,7 +383,11 @@ async function callNanoBanana({ prompt, aspectRatio, seed, apiKey, nano = {}, pr
     width: image.width,
     height: image.height,
     seed: data?.seed,
-    model: canUseProductEdit ? 'nano-banana-2-edit' : 'nano-banana-2',
+    model: canUseEdit
+      ? hasProductRef
+        ? 'nano-banana-2-edit'
+        : 'nano-banana-2-edit-character'
+      : 'nano-banana-2',
   };
 }
 
@@ -390,6 +446,7 @@ async function callImageCascade(prompt, ctx) {
     nanoBanana2,
     productReferenceUrl,
     productCustomReferenceId,
+    characterReferenceUrls = [],
     soul,
     variantIndex,
   } = ctx;
@@ -413,12 +470,28 @@ async function callImageCascade(prompt, ctx) {
           seed,
           productReferenceUrl,
           productCustomReferenceId,
+          // Higgsfield Soul accepts a single conditioning image via
+          // `productReferenceUrl`. When there's no scene-level product
+          // ref but the project DOES have character refs, surface the
+          // first character ref into that slot so Higgsfield still gets
+          // a visual anchor instead of going text-only.
+          ...(productReferenceUrl || productCustomReferenceId
+            ? {}
+            : characterReferenceUrls && characterReferenceUrls.length > 0
+              ? { productReferenceUrl: characterReferenceUrls[0] }
+              : {}),
           soul: soul || {},
         });
         const ms = Date.now() - t0;
         console.log(
           `[image-bench] provider=${step.name} variant=${variantIndex} ms=${ms} ref=${
-            productCustomReferenceId ? 'soul-id' : productReferenceUrl ? 'url' : 'no'
+            productCustomReferenceId
+              ? 'soul-id'
+              : productReferenceUrl
+                ? 'url'
+                : characterReferenceUrls && characterReferenceUrls.length > 0
+                  ? 'character-ref'
+                  : 'no'
           }`
         );
         return { ...result, elapsedMs: ms };
@@ -433,6 +506,7 @@ async function callImageCascade(prompt, ctx) {
           apiKey,
           nano: nanoBanana2 || {},
           productReferenceUrl,
+          characterReferenceUrls,
         });
       } else {
         result = await step.fn({
@@ -446,7 +520,9 @@ async function callImageCascade(prompt, ctx) {
       const refLog =
         result.model === 'nano-banana-2-edit'
           ? 'nano-edit'
-          : 'no';
+          : result.model === 'nano-banana-2-edit-character'
+            ? 'nano-edit-character'
+            : 'no';
       console.log(
         `[image-bench] provider=${step.name} variant=${variantIndex} ms=${ms} ref=${refLog}`
       );
@@ -492,6 +568,16 @@ async function generateSceneVariants(input) {
     imageModelSettings = {},
     productReferenceUrl = null,
     productCustomReferenceId = null,
+    /**
+     * Project-level character reference URLs (the ones the user uploaded
+     * on step 1). Independent of `productReferenceUrl` -- those are
+     * per-scene packshots. When both are present, the product ref leads
+     * `image_urls` (it's a hard packaging constraint) and character refs
+     * follow as supporting anchors. When only character refs are
+     * present, we route Nano Banana through the `/edit` endpoint with
+     * those refs.
+     */
+    characterReferenceUrls = [],
     characterConsistency = null,
     // Optional override so callers can route variants to a different R2
     // prefix (used by the shot-images processor to write into
@@ -551,6 +637,7 @@ async function generateSceneVariants(input) {
         soul,
         productReferenceUrl,
         productCustomReferenceId,
+        characterReferenceUrls,
         imageProvider: imgCfg.imageProvider,
         variantIndex: i,
       });
@@ -592,10 +679,17 @@ async function generateSceneVariants(input) {
 
   const totalMs = Date.now() - benchTotalStart;
   const usedHiggsfield = variants.filter((v) => v.modelUsed === 'higgsfield-soul').length;
+  const charRefCount = Array.isArray(characterReferenceUrls) ? characterReferenceUrls.length : 0;
   console.log(
     `[image-bench] scene=${sceneId} variants=${variants.length}/${variantCount}` +
       ` totalMs=${totalMs} higgsfield=${usedHiggsfield} ref=${
-        productCustomReferenceId ? 'soul-id' : productReferenceUrl ? 'url' : 'no'
+        productCustomReferenceId
+          ? 'soul-id'
+          : productReferenceUrl
+            ? 'url'
+            : charRefCount > 0
+              ? `character-${charRefCount}`
+              : 'no'
       }`
   );
 
