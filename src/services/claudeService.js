@@ -378,6 +378,14 @@ Return ONLY the script text - no titles, no labels, no meta-commentary.`;
       // user opts in per-scene via the shots-review UI; we always suggest
       // so the user can preview without re-calling Claude.
       multiShotTargetSeconds = 2.5,
+      // Step-1 user-supplied visual direction. `visualNotes` is free-text
+      // (e.g. character traits, palette, mood, sample prompt). `visualReferences`
+      // is an array of { base64, mediaType } images we attach as Anthropic
+      // vision content blocks so Claude can derive a consistent
+      // character/aesthetic anchor that gets baked into every scene's
+      // imagePrompt. Both are optional.
+      visualNotes = null,
+      visualReferences = [],
     } = options;
 
     if (!input || typeof input !== 'string') {
@@ -400,8 +408,29 @@ Return ONLY the script text - no titles, no labels, no meta-commentary.`;
 
     const wantShots = Number(multiShotTargetSeconds) > 0;
     const targetShotSecs = Math.max(1.5, Math.min(5, Number(multiShotTargetSeconds) || 2.5));
+    const hasVisualRefs = Array.isArray(visualReferences) && visualReferences.length > 0;
+    const hasVisualNotes = typeof visualNotes === 'string' && visualNotes.trim().length > 0;
 
-    const systemPrompt = `You are an expert short-form video scriptwriter AND visual director for AI-generated cartoons. You produce scene-by-scene breakdowns that pair a detailed cartoon image prompt with a short voiceover line.
+    // When the user gives us reference images / notes, we add an explicit
+    // section to the system prompt so Claude knows to anchor every scene's
+    // imagePrompt to those visuals. Without this, Claude tends to invent
+    // a fresh character per call and ignores attached images.
+    const visualRefsBlock = hasVisualRefs || hasVisualNotes
+      ? `
+
+VISUAL DIRECTION (USER-PROVIDED):
+${hasVisualRefs ? `- ${visualReferences.length} reference image(s) are attached to the user message. Study them carefully BEFORE writing scenes.
+- Treat the reference(s) as canonical for the main character / aesthetic: face shape, hair color & style, eye color, skin tone, age, build, outfit, signature props, color palette, art style.
+- Every scene's imagePrompt MUST describe the same character/aesthetic so downstream image generation stays consistent.` : ''}
+${hasVisualNotes ? `- The user wrote these visual notes (treat as overriding when they conflict with the references):
+"""
+${visualNotes.trim()}
+"""` : ''}
+- If the notes look like a sample image prompt, mirror its style and detail level (camera framing vocabulary, descriptors, length) in every scene's imagePrompt.
+- Do NOT mention the references explicitly in the output -- bake the described traits directly into each imagePrompt as concrete descriptors.`
+      : '';
+
+    const systemPrompt = `You are an expert short-form video scriptwriter AND visual director for AI-generated cartoons. You produce scene-by-scene breakdowns that pair a detailed cartoon image prompt with a short voiceover line.${visualRefsBlock}
 
 HARD RULES:
 1. Output VALID JSON ONLY. No prose, no markdown, no code fences.
@@ -440,12 +469,30 @@ OUTPUT SHAPE (exact keys, no extras):
       ? `Rewrite the following script into ${sceneCount} scenes. Keep the story and key beats; split it into scenes that flow visually.\n\nSOURCE SCRIPT:\n${input}`
       : `Topic: "${input}"\n\nCreate a ${sceneCount}-scene cartoon breakdown.${styleId ? ` Style hint: ${styleId}.` : ''}`;
 
+    // Anthropic accepts an array of content blocks; we lead with the
+    // image blocks so Claude sees the visuals first, then reads the
+    // topic. When no references are attached, we fall back to a plain
+    // string content (same behaviour as before).
+    const userContent = hasVisualRefs
+      ? [
+          ...visualReferences.map((img) => ({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: img.mediaType || 'image/png',
+              data: img.base64,
+            },
+          })),
+          { type: 'text', text: userPrompt },
+        ]
+      : userPrompt;
+
     const maxAttempts = 2;
     let lastError;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        console.log(`🎬 Generating ${sceneCount}-scene script (attempt ${attempt}/${maxAttempts})...`);
+        console.log(`🎬 Generating ${sceneCount}-scene script (attempt ${attempt}/${maxAttempts})${hasVisualRefs ? ` [+${visualReferences.length} ref image(s)]` : ''}...`);
         const message = await this.client.messages.create({
           model: this.config.model,
           max_tokens: Math.max(this.config.maxTokens, 2048),
@@ -453,7 +500,7 @@ OUTPUT SHAPE (exact keys, no extras):
           system: attempt === 1
             ? systemPrompt
             : systemPrompt + '\n\nPREVIOUS ATTEMPT PRODUCED INVALID JSON. Respond with pure JSON only.',
-          messages: [{ role: 'user', content: userPrompt }],
+          messages: [{ role: 'user', content: userContent }],
         });
 
         let text = message.content[0].text.trim();

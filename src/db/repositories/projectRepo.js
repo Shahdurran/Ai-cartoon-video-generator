@@ -16,6 +16,7 @@ const SELECT_COLUMNS = `
   video_model_settings AS "videoModelSettings",
   music_track_id AS "musicTrackId", music_volume AS "musicVolume",
   multi_shot_target_seconds AS "multiShotTargetSeconds",
+  visual_notes AS "visualNotes",
   subtitles_key AS "subtitlesKey", output_key AS "outputKey",
   error_message AS "errorMessage",
   created_at AS "createdAt", updated_at AS "updatedAt"
@@ -34,20 +35,22 @@ async function create(project) {
     videoModelSettings = {},
     musicTrackId = null,
     musicVolume = 0.15,
+    visualNotes = null,
   } = project;
 
   const { rows } = await query(
     `INSERT INTO projects
       (topic, source_script, style_id, scene_count, voice_id,
        voice_settings, subtitle_settings, image_model_settings, video_model_settings,
-       music_track_id, music_volume)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11)
+       music_track_id, music_volume, visual_notes)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12)
      RETURNING ${SELECT_COLUMNS}`,
     [
       topic, sourceScript, styleId, sceneCount, voiceId,
       JSON.stringify(voiceSettings), JSON.stringify(subtitleSettings),
       JSON.stringify(imageModelSettings), JSON.stringify(videoModelSettings),
       musicTrackId, musicVolume,
+      visualNotes && String(visualNotes).trim() ? String(visualNotes).trim() : null,
     ]
   );
   return rows[0];
@@ -156,6 +159,7 @@ async function update(id, patch) {
     musicTrackId: 'music_track_id',
     musicVolume: 'music_volume',
     multiShotTargetSeconds: 'multi_shot_target_seconds',
+    visualNotes: 'visual_notes',
     subtitlesKey: 'subtitles_key',
     outputKey: 'output_key',
     errorMessage: 'error_message',

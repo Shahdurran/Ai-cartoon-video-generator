@@ -20,9 +20,47 @@
 const ClaudeService = require('../../../services/claudeService');
 const sceneRepo = require('../../../db/repositories/sceneRepo');
 const projectRepo = require('../../../db/repositories/projectRepo');
+const projectVisualReferenceRepo = require('../../../db/repositories/projectVisualReferenceRepo');
+const r2Service = require('../../../services/r2Service');
 const pubsub = require('../../../services/pubsubService');
 
 const claude = new ClaudeService();
+
+/** Resolve a media type Claude accepts. Falls back to image/png. */
+function normaliseVisionMediaType(mime) {
+  const m = String(mime || '').toLowerCase();
+  if (m.includes('jpeg') || m.includes('jpg')) return 'image/jpeg';
+  if (m.includes('webp')) return 'image/webp';
+  if (m.includes('gif')) return 'image/gif';
+  return 'image/png';
+}
+
+/**
+ * Pull this project's visual references off R2 as base64 blobs so they
+ * can be inlined into the Claude messages payload. We cap at 4 images
+ * (Anthropic vision works fine with more, but keeping the message small
+ * keeps per-request latency / cost reasonable for the script step).
+ */
+async function loadVisualReferences(projectId) {
+  if (!r2Service.isConfigured()) return [];
+  const rows = await projectVisualReferenceRepo.findByProject(projectId);
+  if (rows.length === 0) return [];
+  const MAX = 4;
+  const trimmed = rows.slice(0, MAX);
+  const out = [];
+  for (const ref of trimmed) {
+    try {
+      const buf = await r2Service.downloadToBuffer(ref.r2Key);
+      out.push({
+        base64: buf.toString('base64'),
+        mediaType: normaliseVisionMediaType(ref.mimeType),
+      });
+    } catch (err) {
+      console.warn(`[sceneScript] Could not load reference ${ref.r2Key}: ${err.message}`);
+    }
+  }
+  return out;
+}
 
 module.exports = async function sceneScriptProcessor(job) {
   const {
@@ -42,6 +80,13 @@ module.exports = async function sceneScriptProcessor(job) {
   await pubsub.publish(projectId, { phase: 'script', status: 'running' });
 
   try {
+    const project = await projectRepo.findById(projectId);
+    const visualNotes =
+      typeof project?.visualNotes === 'string' && project.visualNotes.trim()
+        ? project.visualNotes.trim()
+        : null;
+    const visualReferences = await loadVisualReferences(projectId);
+
     const { scenes, metadata } = await claude.generateSceneScript(input, {
       sceneCount,
       styleId,
@@ -50,6 +95,8 @@ module.exports = async function sceneScriptProcessor(job) {
       tone,
       mode,
       multiShotTargetSeconds,
+      visualNotes,
+      visualReferences,
     });
 
     // bulkReplace (not bulkCreate) so re-running script gen cleanly wipes

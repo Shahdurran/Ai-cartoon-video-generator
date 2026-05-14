@@ -7,11 +7,13 @@
  *   GET    /api/music
  *   GET    /api/music/:id
  *
+ *   POST   /api/visual-references/upload                          (multipart, step-1)
  *   POST   /api/projects
  *   GET    /api/projects
  *   GET    /api/projects/:id
  *   PATCH  /api/projects/:id
  *   DELETE /api/projects/:id
+ *   DELETE /api/projects/:id/visual-references/:refId
  *
  *   PUT    /api/projects/:id/scenes                            (script-review bulk replace)
  *   POST   /api/projects/:id/regenerate-script
@@ -52,8 +54,21 @@ router.get('/music', cartoonMusicController.list);
 router.get('/music/:id', cartoonMusicController.get);
 router.post('/music/upload', cartoonMusicController.upload.single('file'), cartoonMusicController.uploadTrack);
 
+// Step-1 visual reference uploads. Hit BEFORE the project exists; the
+// returned `tempKey`s are passed to POST /projects under
+// `visualReferenceKeys[]` and finalised into per-project storage there.
+router.post(
+  '/visual-references/upload',
+  projectController.upload.array('images', 8),
+  projectController.uploadVisualReferences
+);
+
 router.post('/projects', projectController.create);
 router.get('/projects', projectController.list);
+router.delete(
+  '/projects/:id/visual-references/:refId',
+  projectController.deleteVisualReference
+);
 router.get('/projects/:id', projectController.get);
 router.patch('/projects/:id', projectController.patch);
 router.delete('/projects/:id', projectController.remove);

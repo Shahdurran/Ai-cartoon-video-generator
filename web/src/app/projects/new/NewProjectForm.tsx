@@ -1,8 +1,14 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, type Style, type Voice, type MusicTrack } from '@/lib/api';
+import {
+  api,
+  type Style,
+  type Voice,
+  type MusicTrack,
+  type StagedVisualReference,
+} from '@/lib/api';
 
 type Props = {
   styles: Style[];
@@ -30,8 +36,15 @@ export function NewProjectForm({ styles }: Props) {
   const [sceneCount, setSceneCount] = useState(5);
   const [totalDurationSeconds, setTotalDurationSeconds] = useState<number | ''>(30);
   const [tone, setTone] = useState('dramatic');
+  const [visualNotes, setVisualNotes] = useState('');
+  const [visualRefs, setVisualRefs] = useState<StagedVisualReference[]>([]);
+  const [refsUploading, setRefsUploading] = useState(false);
+  const [refsError, setRefsError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const MAX_VISUAL_REFS = 4;
 
   const perSceneSeconds = useMemo(() => {
     if (typeof totalDurationSeconds !== 'number' || sceneCount <= 0) return null;
@@ -48,6 +61,37 @@ export function NewProjectForm({ styles }: Props) {
     }
     return null;
   }, [perSceneSeconds]);
+
+  async function handleAddReferenceFiles(files: FileList | File[]) {
+    const incoming = Array.from(files);
+    if (incoming.length === 0) return;
+    const remaining = MAX_VISUAL_REFS - visualRefs.length;
+    if (remaining <= 0) {
+      setRefsError(`Max ${MAX_VISUAL_REFS} reference images.`);
+      return;
+    }
+    const accepted = incoming.slice(0, remaining);
+    const tooMany = incoming.length > remaining;
+    setRefsError(null);
+    setRefsUploading(true);
+    try {
+      const { uploaded } = await api.uploadVisualReferences(accepted);
+      setVisualRefs((prev) => [...prev, ...uploaded]);
+      if (tooMany) {
+        setRefsError(`Only the first ${accepted.length} were uploaded (cap is ${MAX_VISUAL_REFS}).`);
+      }
+    } catch (err: any) {
+      setRefsError(err?.message || 'Failed to upload reference images');
+    } finally {
+      setRefsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  function removeReference(tempKey: string) {
+    setVisualRefs((prev) => prev.filter((r) => r.tempKey !== tempKey));
+    setRefsError(null);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -71,6 +115,9 @@ export function NewProjectForm({ styles }: Props) {
         totalDurationSeconds:
           typeof totalDurationSeconds === 'number' ? totalDurationSeconds : undefined,
         tone,
+        visualNotes: visualNotes.trim() ? visualNotes.trim() : undefined,
+        visualReferenceKeys:
+          visualRefs.length > 0 ? visualRefs.map((r) => r.tempKey) : undefined,
       });
       // Land on the script-review page; project detail page also handles
       // routing, but this saves the user a redirect hop.
@@ -182,7 +229,102 @@ export function NewProjectForm({ styles }: Props) {
       </section>
 
       <section className="animate-fade-up stagger-2">
-        <SectionHeader step="3" title="Scenes & duration" />
+        <SectionHeader
+          step="3"
+          title="Visual direction (optional)"
+        />
+        <p className="text-[12px] text-ink-200/70 -mt-2 mb-3 max-w-2xl">
+          Upload <span className="text-white">reference images</span> (character art, packshot, mood board)
+          and/or describe the <span className="text-white">character traits & visual style</span> you want — Claude will
+          read these and bake them into every scene&rsquo;s image prompt. Everything here is optional;
+          the style preset above still applies on top.
+        </p>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <span className="label block">Reference images</span>
+            <p className="text-[11px] text-ink-200/65">
+              Up to {MAX_VISUAL_REFS} images (PNG/JPG/WebP, 8MB each). Used by Claude as the
+              canonical look for the main character.
+            </p>
+            <div className="grid grid-cols-4 gap-2">
+              {visualRefs.map((ref) => (
+                <div
+                  key={ref.tempKey}
+                  className="relative aspect-square overflow-hidden rounded-xl border border-white/15 bg-black/30"
+                  title={ref.originalName || 'reference image'}
+                >
+                  {ref.signedUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={ref.signedUrl}
+                      alt={ref.originalName || 'reference'}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center text-[10px] text-ink-100/60">
+                      preview unavailable
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeReference(ref.tempKey)}
+                    className="absolute right-1 top-1 rounded-md bg-black/65 px-1.5 py-0.5 text-[10px] text-white/85 hover:bg-black/85"
+                    aria-label="Remove reference"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {visualRefs.length < MAX_VISUAL_REFS && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={refsUploading}
+                  className="flex aspect-square items-center justify-center rounded-xl border border-dashed border-white/20 bg-white/[0.02] text-[11px] text-ink-100/70 transition hover:border-white/35 hover:bg-white/[0.05] disabled:opacity-50"
+                >
+                  {refsUploading ? 'Uploading…' : '+ Add'}
+                </button>
+              )}
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              hidden
+              onChange={(e) => {
+                if (e.target.files) handleAddReferenceFiles(e.target.files);
+              }}
+            />
+            {refsError && (
+              <div className="text-[11px] text-rose-300">{refsError}</div>
+            )}
+          </div>
+
+          <label className="block">
+            <span className="label mb-1.5 block">Character traits / visual notes</span>
+            <textarea
+              value={visualNotes}
+              onChange={(e) => setVisualNotes(e.target.value)}
+              placeholder={
+                'e.g. Tall teenage basketball player with dark blue spiky hair, tanned skin, ' +
+                'sharp navy eyes, black sleeveless hoodie. Cinematic golden-hour palette. ' +
+                'Or paste a sample image prompt and Claude will mirror its style.'
+              }
+              rows={8}
+              className="field"
+            />
+            <p className="mt-1.5 text-[11px] text-ink-200/65">
+              Either a description, a sample prompt, or both. If you upload references, the
+              notes <span className="text-white/85">override</span> them when they conflict.
+            </p>
+          </label>
+        </div>
+      </section>
+
+      <section className="animate-fade-up stagger-2">
+        <SectionHeader step="4" title="Scenes & duration" />
         <div className="grid grid-cols-2 gap-6">
           <label className="block">
             <span className="label mb-1.5 block">Scenes</span>

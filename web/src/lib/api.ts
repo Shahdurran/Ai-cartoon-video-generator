@@ -286,6 +286,33 @@ export type Project = {
   updatedAt: string;
   scenes: Scene[];
   hookVariants: HookVariant[];
+  /** Optional Step-1 free-text visual direction Claude uses when authoring
+   *  every scene's imagePrompt (character traits, palette, sample prompt, etc). */
+  visualNotes?: string | null;
+  /** Reference images attached in Step 1. Claude reads them via the vision
+   *  API to keep characters/aesthetic consistent across all scenes. */
+  visualReferences?: ProjectVisualReference[];
+};
+
+export type ProjectVisualReference = {
+  id: string;
+  projectId: string;
+  r2Key: string;
+  sortIndex: number;
+  mimeType: string | null;
+  createdAt: string;
+  signedUrl: string | null;
+};
+
+/** Server response for `POST /api/visual-references/upload`: pre-project
+ *  staged blobs the New Project form holds onto, then sends back to the
+ *  server inside `createProject({ visualReferenceKeys })`. */
+export type StagedVisualReference = {
+  tempKey: string;
+  signedUrl: string | null;
+  originalName: string | null;
+  mimeType: string | null;
+  sizeBytes: number;
 };
 
 /**
@@ -382,11 +409,48 @@ export const api = {
     totalDurationSeconds?: number;
     language?: string;
     tone?: string;
+    /** Optional Step-1 free-text visual direction Claude uses when
+     *  authoring every scene's imagePrompt. */
+    visualNotes?: string;
+    /** R2 keys from `uploadVisualReferences`. Server moves them into
+     *  the project's prefix and persists rows. */
+    visualReferenceKeys?: string[];
   }) =>
     request<{ project: Project }>('/api/projects', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  /** Upload one or more reference images BEFORE the project exists.
+   *  Returns the temp R2 keys the New Project form should hand back to
+   *  `createProject({ visualReferenceKeys })`. */
+  uploadVisualReferences: async (files: File[]) => {
+    const fd = new FormData();
+    for (const f of files) fd.append('images', f);
+    const res = await fetch(`${API_BASE}/api/visual-references/upload`, {
+      method: 'POST',
+      body: fd,
+    });
+    if (!res.ok) {
+      let message = `${res.status} ${res.statusText}`;
+      try {
+        const b = await res.json();
+        if (b?.error) message = b.error;
+      } catch (_) {
+        /* ignore */
+      }
+      throw new Error(message);
+    }
+    return res.json() as Promise<{ uploaded: StagedVisualReference[] }>;
+  },
+
+  /** Detach an already-attached visual reference from a project. Only
+   *  allowed pre-pipeline (the server enforces the same gate). */
+  deleteVisualReference: (projectId: string, refId: string) =>
+    request<{ removed: string }>(
+      `/api/projects/${projectId}/visual-references/${refId}`,
+      { method: 'DELETE' }
+    ),
   patchProject: (id: string, body: Partial<Project>) =>
     request<{ project: Project }>(`/api/projects/${id}`, {
       method: 'PATCH',

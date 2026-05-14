@@ -33,6 +33,8 @@ const shotRepo = require('../db/repositories/shotRepo');
 const styleRepo = require('../db/repositories/styleRepo');
 const musicTrackRepo = require('../db/repositories/musicTrackRepo');
 const hookVariantRepo = require('../db/repositories/hookVariantRepo');
+const projectVisualReferenceRepo = require('../db/repositories/projectVisualReferenceRepo');
+const { randomUUID } = require('crypto');
 
 const r2Service = require('../services/r2Service');
 const pubsub = require('../services/pubsubService');
@@ -83,6 +85,19 @@ async function urlFor(key) {
     if (pub) return pub;
   }
   return r2Service.getSignedDownloadUrl(key).catch(() => null);
+}
+
+/**
+ * Map a browser-uploaded image mime to the canonical file extension we
+ * use when keying objects on R2. Falls back to png so the bucket key is
+ * always something we can serve.
+ */
+function imageExtFromMime(mime) {
+  const m = String(mime || '').toLowerCase();
+  if (m.includes('jpeg') || m.includes('jpg')) return 'jpg';
+  if (m.includes('webp')) return 'webp';
+  if (m.includes('gif')) return 'gif';
+  return 'png';
 }
 
 async function hydrateImageVariants(images) {
@@ -142,10 +157,19 @@ async function hydrateProjectDetailed(project) {
     project.subtitleSettings?.customFontKey
   );
 
+  const visualReferences = await projectVisualReferenceRepo.findByProject(project.id);
+  const visualReferencesHydrated = await Promise.all(
+    visualReferences.map(async (ref) => ({
+      ...ref,
+      signedUrl: await urlFor(ref.r2Key),
+    }))
+  );
+
   return {
     ...project,
     scenes: fullScenes,
     hookVariants: hydratedHooks,
+    visualReferences: visualReferencesHydrated,
     outputSignedUrl,
     subtitlesSignedUrl,
     subtitleCustomFontSignedUrl,
@@ -171,6 +195,13 @@ async function create(req, res, next) {
       totalDurationSeconds = null,
       language = 'English',
       tone = 'dramatic',
+      visualNotes = null,
+      // Pre-uploaded reference image keys (returned by
+      // POST /visual-references/upload). The frontend collects them as
+      // the user picks files in step 1, then sends the keys with the
+      // create body. We move them into the project's prefix here and
+      // persist a project_visual_references row per image.
+      visualReferenceKeys = [],
     } = req.body;
 
     if (!topic && !sourceScript) {
@@ -188,12 +219,59 @@ async function create(req, res, next) {
       if (!track) return res.status(400).json({ error: `Unknown musicTrackId: ${musicTrackId}` });
     }
 
+    if (!Array.isArray(visualReferenceKeys)) {
+      return res
+        .status(400)
+        .json({ error: 'visualReferenceKeys must be an array of staged R2 keys' });
+    }
+    // Defensive: only allow keys we minted ourselves. The temp upload
+    // endpoint always writes under `temp/visual-references/`, so we
+    // refuse anything else to keep callers from copying arbitrary
+    // bucket objects into a project.
+    for (const k of visualReferenceKeys) {
+      if (typeof k !== 'string' || !k.startsWith('temp/visual-references/')) {
+        return res
+          .status(400)
+          .json({ error: `Unrecognised reference key: ${k}` });
+      }
+    }
+
     const project = await projectRepo.create({
       topic, sourceScript, styleId, sceneCount,
       voiceId, voiceSettings, subtitleSettings,
       imageModelSettings, videoModelSettings,
       musicTrackId, musicVolume,
+      visualNotes,
     });
+
+    // Move every staged reference to a stable per-project key so the
+    // temp objects can be safely cleaned up out-of-band. We keep the
+    // mime type the temp upload recorded so Claude vision calls get
+    // the right Content-Type later.
+    if (visualReferenceKeys.length > 0 && r2Service.isConfigured()) {
+      const refRows = [];
+      for (let i = 0; i < visualReferenceKeys.length; i++) {
+        const tempKey = visualReferenceKeys[i];
+        const extMatch = tempKey.match(/\.([a-z0-9]+)$/i);
+        const ext = (extMatch ? extMatch[1] : 'png').toLowerCase();
+        const refId = randomUUID();
+        const dstKey = `projects/${project.id}/visual-references/${refId}.${ext}`;
+        try {
+          await r2Service.copy(tempKey, dstKey);
+          await r2Service.del(tempKey).catch(() => {});
+          refRows.push({
+            r2Key: dstKey,
+            sortIndex: i,
+            mimeType: r2Service.guessContentType(`f.${ext}`),
+          });
+        } catch (err) {
+          console.warn(`[create] Failed to attach visual reference ${tempKey}: ${err.message}`);
+        }
+      }
+      if (refRows.length > 0) {
+        await projectVisualReferenceRepo.bulkCreate(project.id, refRows);
+      }
+    }
 
     await queues.sceneScript.add('generate', {
       projectId: project.id,
@@ -207,7 +285,107 @@ async function create(req, res, next) {
       multiShotTargetSeconds: Number(project.multiShotTargetSeconds) || 2.5,
     });
 
-    res.status(201).json({ project });
+    // Re-fetch so the response carries visualNotes + freshly-hydrated
+    // visualReferences (with signed URLs).
+    const hydrated = await hydrateProjectDetailed(
+      await projectRepo.findById(project.id)
+    );
+    res.status(201).json({ project: hydrated });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Temporary upload landing for visual reference images on the New Project
+ * page. The frontend calls this BEFORE the project exists -- multipart
+ * with one or more `images[]` files. We write each to
+ * `temp/visual-references/<uuid>.<ext>` and return the stable R2 keys
+ * (plus signed preview URLs) so the user can preview thumbnails and so
+ * the create handler can later move them into the project's prefix.
+ *
+ *   POST /api/visual-references/upload  (multipart, field name: images)
+ *
+ * Anything left under `temp/visual-references/` that is never finalised
+ * is safe to garbage-collect periodically (out of scope here).
+ */
+async function uploadVisualReferences(req, res, next) {
+  try {
+    const files = (req.files || []).filter((f) => !!f);
+    if (files.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded' });
+    }
+    if (!r2Service.isConfigured()) {
+      return res.status(503).json({ error: 'Object storage is not configured' });
+    }
+    const MAX_BYTES = 8 * 1024 * 1024;
+    for (const f of files) {
+      const mime = String(f.mimetype || '').toLowerCase();
+      if (!mime.startsWith('image/')) {
+        return res.status(400).json({ error: `Not an image: ${f.originalname}` });
+      }
+      if (f.size > MAX_BYTES) {
+        return res.status(400).json({
+          error: `Image too large (${f.originalname}). Max 8MB per reference.`,
+        });
+      }
+    }
+
+    const uploaded = [];
+    for (const f of files) {
+      const ext = imageExtFromMime(f.mimetype);
+      const tempKey = `temp/visual-references/${randomUUID()}.${ext}`;
+      await r2Service.upload(tempKey, f.buffer, f.mimetype || 'image/png');
+      uploaded.push({
+        tempKey,
+        signedUrl: await urlFor(tempKey),
+        originalName: f.originalname || null,
+        mimeType: f.mimetype || null,
+        sizeBytes: f.size,
+      });
+    }
+
+    res.json({ uploaded });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Detach (and delete) one visual reference from a project. Only valid
+ * before the script has been approved -- once Claude has authored scenes
+ * the references have already shaped the imagePrompts, so removing them
+ * after that point would be misleading.
+ *
+ *   DELETE /api/projects/:id/visual-references/:refId
+ */
+async function deleteVisualReference(req, res, next) {
+  try {
+    const { id: projectId, refId } = req.params;
+    const project = await projectRepo.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const lockedStates = new Set([
+      'generating',
+      'assembling',
+      'complete',
+    ]);
+    if (lockedStates.has(project.status)) {
+      return res.status(409).json({
+        error: `Cannot edit visual references when project status is '${project.status}'`,
+      });
+    }
+
+    const ref = await projectVisualReferenceRepo.findById(refId);
+    if (!ref || ref.projectId !== projectId) {
+      return res.status(404).json({ error: 'Visual reference not found' });
+    }
+
+    if (ref.r2Key && r2Service.isConfigured()) {
+      r2Service.del(ref.r2Key).catch(() => {});
+    }
+    await projectVisualReferenceRepo.remove(refId);
+    res.json({ removed: refId });
   } catch (err) {
     next(err);
   }
@@ -1664,6 +1842,7 @@ async function statusStream(req, res, next) {
 }
 
 module.exports = {
+  uploadVisualReferences, deleteVisualReference,
   create, list, get, patch, remove,
   replaceScenes, regenerateScript, approveScript,
   patchScene,

@@ -234,6 +234,15 @@ const keys = {
     `projects/${projectId}/scenes/${sceneId}/upload-${Date.now()}-${filename}`,
   productReference: (projectId, sceneId, ext = 'png') =>
     `projects/${projectId}/scenes/${sceneId}/product-reference.${ext}`,
+  /** Step-1 project-wide reference image used by Claude when generating
+   *  the scene/imagePrompts. `id` is the row UUID so we never collide. */
+  visualReference: (projectId, id, ext = 'png') =>
+    `projects/${projectId}/visual-references/${id}.${ext}`,
+  /** Pre-project staging key for visual references uploaded BEFORE the
+   *  project row exists. Finalised into `visualReference()` once
+   *  POST /api/projects creates the project. */
+  visualReferenceTemp: (uploadId, ext = 'png') =>
+    `temp/visual-references/${uploadId}.${ext}`,
 };
 
 module.exports = {
