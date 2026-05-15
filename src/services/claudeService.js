@@ -2,6 +2,63 @@ const Anthropic = require('@anthropic-ai/sdk');
 const apiConfig = require('../config/api.config');
 const PromptTemplateService = require('./promptTemplateService');
 
+/**
+ * Best-effort repair for `{"scenes":[...]}` JSON that Claude returned
+ * truncated -- typically because we hit `max_tokens` mid-string inside
+ * the Nth scene's `imagePrompt` / `suggestedShots[k].imagePrompt`. The
+ * goal is to recover the longest valid prefix of `scenes[]` so callers
+ * can decide whether the partial result is usable.
+ *
+ * Strategy: walk forward through the string tracking string/escape and
+ * brace depth so we know when we're inside a quoted value. Each time
+ * the cursor closes an object at depth 1 inside the `scenes` array,
+ * record that index as the last fully-closed scene. Once the parser
+ * cannot make progress, slice the string back to the last closed
+ * scene, append `]}` and parse. Returns the parsed object or `null`
+ * if no complete scene was recovered.
+ */
+function tryRepairTruncatedScenesJson(rawText) {
+  if (typeof rawText !== 'string' || rawText.length < 32) return null;
+  const arrStart = rawText.indexOf('"scenes"');
+  if (arrStart === -1) return null;
+  const arrBracket = rawText.indexOf('[', arrStart);
+  if (arrBracket === -1) return null;
+
+  let i = arrBracket + 1;
+  let depth = 0;          // depth inside the scenes[] array
+  let inString = false;
+  let escape = false;
+  let lastSceneCloseIdx = -1;
+
+  for (; i < rawText.length; i++) {
+    const ch = rawText[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\') { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{' || ch === '[') depth++;
+    else if (ch === '}' || ch === ']') {
+      depth--;
+      // A `}` that brings depth back to 0 is the end of one scene
+      // object (the next char is either `,` or `]`).
+      if (depth === 0 && ch === '}') lastSceneCloseIdx = i;
+      if (depth < 0) break; // hit the array's closing ']'
+    }
+  }
+
+  if (lastSceneCloseIdx === -1) return null;
+  const truncated = rawText.slice(0, lastSceneCloseIdx + 1) + ']}';
+  try {
+    const parsed = JSON.parse(truncated);
+    if (parsed && Array.isArray(parsed.scenes) && parsed.scenes.length > 0) {
+      return parsed;
+    }
+  } catch (_) {
+    /* fall through */
+  }
+  return null;
+}
+
 class ClaudeService {
   constructor() {
     if (!apiConfig.claude.apiKey) {
@@ -487,15 +544,34 @@ OUTPUT SHAPE (exact keys, no extras):
         ]
       : userPrompt;
 
+    // Size the output budget to the request. The default `maxTokens`
+    // (4096) is fine for a 3-5 scene short, but a 20-scene rewrite with
+    // suggestedShots routinely produces 6K-12K tokens of JSON and we
+    // get truncated mid-string ("Unterminated string in JSON at
+    // position 17xxx") on the 4096 cap. Estimate ~350-450 tokens per
+    // scene (imagePrompt + voiceover + 2-4 suggestedShots) with a
+    // generous floor of 4K and a sensible ceiling of 16K to keep
+    // single-call latency / cost bounded.
+    const perSceneTokens = wantShots ? 450 : 250;
+    const dynamicTokenBudget = Math.min(
+      16_000,
+      Math.max(4096, Math.ceil(sceneCount * perSceneTokens) + 800)
+    );
+
     const maxAttempts = 2;
     let lastError;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let message;
       try {
-        console.log(`🎬 Generating ${sceneCount}-scene script (attempt ${attempt}/${maxAttempts})${hasVisualRefs ? ` [+${visualReferences.length} ref image(s)]` : ''}...`);
-        const message = await this.client.messages.create({
+        console.log(
+          `🎬 Generating ${sceneCount}-scene script (attempt ${attempt}/${maxAttempts}) [maxTokens=${dynamicTokenBudget}]${
+            hasVisualRefs ? ` [+${visualReferences.length} ref image(s)]` : ''
+          }...`
+        );
+        message = await this.client.messages.create({
           model: this.config.model,
-          max_tokens: Math.max(this.config.maxTokens, 2048),
+          max_tokens: dynamicTokenBudget,
           temperature: attempt === 1 ? 0.7 : 0.4, // tighten on retry
           system: attempt === 1
             ? systemPrompt
@@ -503,18 +579,50 @@ OUTPUT SHAPE (exact keys, no extras):
           messages: [{ role: 'user', content: userContent }],
         });
 
+        if (message.stop_reason && message.stop_reason !== 'end_turn') {
+          console.warn(
+            `   ↪ stop_reason=${message.stop_reason} output_tokens=${message.usage?.output_tokens}`
+          );
+        }
+
         let text = message.content[0].text.trim();
         // Strip accidental code fences.
         if (text.startsWith('```')) {
           text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
         }
 
-        const parsed = JSON.parse(text);
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch (parseErr) {
+          // Most common cause here is truncation at max_tokens: the JSON
+          // ends mid-string inside a `scenes[N].imagePrompt`. Try to
+          // recover the valid prefix so the user can still proceed,
+          // especially since each retry costs another model call.
+          parsed = tryRepairTruncatedScenesJson(text);
+          if (!parsed) throw parseErr;
+          console.warn(
+            `   ↪ Recovered ${parsed.scenes?.length || 0} scene(s) from truncated JSON.`
+          );
+        }
         if (!parsed.scenes || !Array.isArray(parsed.scenes)) {
           throw new Error('Response missing "scenes" array');
         }
         if (parsed.scenes.length !== sceneCount) {
-          throw new Error(`Expected ${sceneCount} scenes, got ${parsed.scenes.length}`);
+          // After repair we may legitimately have fewer than requested.
+          // Accept the recovered subset only if we got at least half
+          // (and at least 3) -- otherwise it's not worth showing the
+          // user. The second attempt will try a fresh generation.
+          const recoveredEnough =
+            parsed.scenes.length >= Math.max(3, Math.ceil(sceneCount / 2));
+          if (!(attempt === maxAttempts && recoveredEnough)) {
+            throw new Error(
+              `Expected ${sceneCount} scenes, got ${parsed.scenes.length}`
+            );
+          }
+          console.warn(
+            `   ↪ Accepting partial response: ${parsed.scenes.length}/${sceneCount} scenes`
+          );
         }
 
         const scenes = parsed.scenes.map((s, i) => {
