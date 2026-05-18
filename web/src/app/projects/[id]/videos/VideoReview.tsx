@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, type Project, type Scene, type SceneShot } from '@/lib/api';
 import { subscribeProjectStatus } from '@/lib/projectStatusStream';
+import { deriveSingleShotVideoPhase } from '@/lib/sceneStatus';
 
 type SceneVideoState = 'idle' | 'queued' | 'submitting' | 'polling' | 'running' | 'complete' | 'failed' | 'partial' | 'requeued';
 
@@ -58,7 +59,9 @@ export function VideoReview({ initialProject }: { initialProject: Project }) {
           ? 'complete'
           : s.status === 'failed'
             ? 'failed'
-            : 'running',
+            : s.multiShotEnabled
+              ? deriveMultiShotPhase(s)
+              : deriveSingleShotVideoPhase(s, initialProject.status),
       ])
     )
   );
@@ -110,6 +113,22 @@ export function VideoReview({ initialProject }: { initialProject: Project }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id]);
+
+  // Keep per-scene phase aligned with polled project data (videoKey / failed).
+  useEffect(() => {
+    setPhase((prev) => {
+      const next = { ...prev };
+      for (const s of project.scenes) {
+        if (s.multiShotEnabled) continue;
+        next[s.id] = deriveSingleShotVideoPhase(
+          s,
+          project.status,
+          prev[s.id]
+        );
+      }
+      return next;
+    });
+  }, [project.scenes, project.status]);
 
   const orderedScenes = useMemo(
     () => [...project.scenes].sort((a, b) => a.sceneIndex - b.sceneIndex),
@@ -191,9 +210,10 @@ export function VideoReview({ initialProject }: { initialProject: Project }) {
           <SceneVideoCard
             key={scene.id}
             projectId={project.id}
+            projectStatus={project.status}
             scene={scene}
             index={i}
-            phase={phase[scene.id] || (isSceneVideoReady(scene) ? 'complete' : 'running')}
+            phase={phase[scene.id] || (isSceneVideoReady(scene) ? 'complete' : 'idle')}
             busy={busy === scene.id}
             onRegenerate={() => regenerate(scene.id)}
             onShotChanged={async () => {
@@ -213,6 +233,7 @@ export function VideoReview({ initialProject }: { initialProject: Project }) {
 
 function SceneVideoCard({
   projectId,
+  projectStatus,
   scene,
   index,
   phase,
@@ -221,6 +242,7 @@ function SceneVideoCard({
   onShotChanged,
 }: {
   projectId: string;
+  projectStatus: string;
   scene: Scene;
   index: number;
   phase: SceneVideoState;
@@ -255,7 +277,7 @@ function SceneVideoCard({
   // initial seed of 'running'. Use the shot-aggregated phase instead.
   const effectivePhase: SceneVideoState = isMultiShot
     ? deriveMultiShotPhase(scene)
-    : phase;
+    : deriveSingleShotVideoPhase(scene, project.status, phase);
 
   const previewUrl = isMultiShot
     ? null
@@ -263,11 +285,18 @@ function SceneVideoCard({
 
   const isReady = isMultiShot
     ? effectivePhase === 'complete' || effectivePhase === 'partial'
-    : !!previewUrl && (effectivePhase === 'complete' || effectivePhase === 'partial');
-  const isFailed =
-    effectivePhase === 'failed' ||
-    (!isMultiShot && !isSceneVideoReady(scene) && scene.status === 'failed');
-  const isRendering = !isReady && !isFailed;
+    : !!previewUrl && effectivePhase === 'complete';
+  const isFailed = effectivePhase === 'failed';
+  const isRendering =
+    !isReady &&
+    !isFailed &&
+    effectivePhase !== 'idle' &&
+    (effectivePhase === 'running' ||
+      effectivePhase === 'queued' ||
+      effectivePhase === 'submitting' ||
+      effectivePhase === 'polling' ||
+      effectivePhase === 'requeued');
+  const needsRender = !isMultiShot && effectivePhase === 'idle';
   const failureNote = isMultiShot
     ? shots.find((sh) => sh.status === 'failed' && !sh.videoKey)?.errorMessage
     : scene.errorMessage;
@@ -308,6 +337,16 @@ function SceneVideoCard({
               preload="metadata"
               className="h-full w-full object-contain"
             />
+          )}
+          {needsRender && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-xs text-ink-100/70 px-4 text-center">
+              <div className="font-medium text-white/90 mb-1">
+                New still — video needed
+              </div>
+              <div className="text-[11px] text-ink-100/60">
+                Click Regenerate below to run Seedance for this scene only.
+              </div>
+            </div>
           )}
           {isRendering && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-xs text-ink-100/70">
@@ -356,7 +395,11 @@ function SceneVideoCard({
               : 'Discard this take and re-run Seedance for this scene'
           }
         >
-          {busy ? 'Re-queuing…' : 'Regenerate this scene'}
+          {busy
+            ? 'Re-queuing…'
+            : needsRender
+              ? 'Generate video for this scene'
+              : 'Regenerate this scene'}
         </button>
       )}
       {isMultiShot && (

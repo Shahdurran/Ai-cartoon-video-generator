@@ -1185,18 +1185,31 @@ async function regenerateSceneVideo(req, res, next) {
   try {
     const { id: projectId, sceneId } = req.params;
 
-    const scene = await sceneRepo.findById(sceneId);
+    const [scene, project] = await Promise.all([
+      sceneRepo.findById(sceneId),
+      projectRepo.findById(projectId),
+    ]);
     if (!scene || scene.projectId !== projectId) {
       return res.status(404).json({ error: 'Scene not found' });
     }
+    if (!project) return res.status(404).json({ error: 'Project not found' });
     if (!scene.selectedImageId) {
       return res.status(400).json({ error: 'Scene has no selected image' });
     }
 
-    // Reset video state for this scene only.
-    await sceneRepo.updateStatus(sceneId, 'image-ready', null, null);
+    if (scene.multiShotEnabled) {
+      return res.status(400).json({
+        error: 'Use shot-level regenerate for multi-shot scenes',
+      });
+    }
+
+    await sceneRepo.clearSceneVideo(sceneId);
+    await stillChangeInvalidation.stripAssembledFinalIfAny(projectId);
 
     const job = await queues.seedanceVideo.add('submit', { projectId, sceneId });
+    if (project.status !== 'generating') {
+      await projectRepo.updateStatus(projectId, 'generating', null);
+    }
     await pubsub.publish(projectId, { sceneId, phase: 'video', status: 'requeued' });
     res.json({ enqueued: true, jobId: job.id });
   } catch (err) {
@@ -1893,8 +1906,13 @@ async function regenerateShotVideo(req, res, next) {
     if (!shot.selectedImageId) {
       return res.status(400).json({ error: 'Shot has no selected image' });
     }
-    await shotRepo.updateStatus(shotId, 'image-ready', null, null);
+    await shotRepo.clearShotVideo(shotId);
+    await stillChangeInvalidation.stripAssembledFinalIfAny(projectId);
+    const project = await projectRepo.findById(projectId);
     const job = await queues.shotVideo.add('submit', { projectId, sceneId, shotId });
+    if (project && project.status !== 'generating') {
+      await projectRepo.updateStatus(projectId, 'generating', null);
+    }
     await pubsub.publish(projectId, { sceneId, shotId, phase: 'shot-video', status: 'requeued' });
     res.json({ enqueued: true, jobId: job.id });
   } catch (err) {

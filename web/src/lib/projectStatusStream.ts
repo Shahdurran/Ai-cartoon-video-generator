@@ -126,6 +126,9 @@ function diffAndEmit(entry: Entry, fresh: Project) {
     if (!before.voiceKey && s.voiceKey) {
       emit(entry, { phase: 'voice', sceneId: s.id, status: 'complete' });
     }
+    if (before.videoKey && !s.videoKey) {
+      emit(entry, { phase: 'video', sceneId: s.id, status: 'idle' });
+    }
     if (!before.videoKey && s.videoKey) {
       emit(entry, { phase: 'video', sceneId: s.id, status: 'complete' });
     } else if (before.status !== 'failed' && s.status === 'failed') {

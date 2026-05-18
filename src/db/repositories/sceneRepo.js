@@ -154,6 +154,7 @@ async function clearSceneVideo(sceneId) {
   await query(
     `UPDATE scenes
      SET video_key = NULL,
+         fal_request_id = NULL,
          status = 'image-ready',
          error_message = NULL,
          error_code = NULL

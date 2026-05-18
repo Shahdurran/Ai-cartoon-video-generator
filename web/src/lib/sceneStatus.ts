@@ -84,3 +84,44 @@ export function inferScenePipelinePhases(
 
   return { image, voice, video, pipelineError };
 }
+
+const VIDEO_IN_FLIGHT_PHASES = new Set([
+  'submitting',
+  'queued',
+  'polling',
+  'requeued',
+  'running',
+]);
+
+/**
+ * Single-shot scene video card state for /videos. Avoids showing "Rendering…"
+ * when the still changed but no Seedance job is actually in flight.
+ */
+export function deriveSingleShotVideoPhase(
+  scene: Scene,
+  projectStatus: string,
+  livePhase?: string
+): ScenePipelinePhase {
+  if (scene.videoKey) return 'complete';
+  if (isSceneVideoStageFailed(scene)) return 'failed';
+
+  if (livePhase && VIDEO_IN_FLIGHT_PHASES.has(livePhase)) {
+    if (projectStatus === 'generating' || scene.falRequestId) {
+      return livePhase as ScenePipelinePhase;
+    }
+  }
+
+  if (scene.falRequestId) {
+    return (livePhase as ScenePipelinePhase) || 'polling';
+  }
+
+  if (
+    projectStatus === 'generating' &&
+    scene.voiceKey &&
+    !scene.videoKey
+  ) {
+    return 'running';
+  }
+
+  return 'idle';
+}

@@ -191,6 +191,7 @@ async function clearShotVideo(shotId) {
   await query(
     `UPDATE scene_shots
      SET video_key = NULL,
+         fal_request_id = NULL,
          status = 'image-ready',
          error_message = NULL,
          error_code = NULL
