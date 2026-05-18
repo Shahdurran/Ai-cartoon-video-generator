@@ -277,7 +277,7 @@ function SceneVideoCard({
   // initial seed of 'running'. Use the shot-aggregated phase instead.
   const effectivePhase: SceneVideoState = isMultiShot
     ? deriveMultiShotPhase(scene)
-    : deriveSingleShotVideoPhase(scene, project.status, phase);
+    : deriveSingleShotVideoPhase(scene, projectStatus, phase);
 
   const previewUrl = isMultiShot
     ? null
