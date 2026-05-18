@@ -162,13 +162,13 @@ function classifyImageError(message) {
   return 'unknown';
 }
 
-async function postToFal(endpoint, body, apiKey) {
+async function postToFal(endpoint, body, apiKey, timeoutMs = 180_000) {
   const res = await axios.post(endpoint, body, {
     headers: {
       Authorization: `Key ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    timeout: 180_000,
+    timeout: timeoutMs,
   });
   return res.data;
 }
@@ -696,8 +696,110 @@ async function generateSceneVariants(input) {
   return variants;
 }
 
+/**
+ * Prompt for fal-ai/kling-image/o1: @Image1 = existing frame, @Image2 = product packshot.
+ * Docs: https://fal.ai/models/fal-ai/kling-image/o1 — max ~2500 chars on `prompt`.
+ */
+function buildKlingProductInsertPrompt(scenePrompt, instruction) {
+  const scene = clipText(scenePrompt, 1200);
+  const extra = clipText(instruction, 400);
+  const parts = [
+    'Edit @Image1 (the current storyboard frame).',
+    'Integrate the exact product packaging from @Image2 into that frame.',
+    'Preserve the illustration style, characters, lighting, and composition of @Image1 as much as possible.',
+    'The product must match @Image2 for logo, label, typography, colors, proportions, and pack shape.',
+    'Place it naturally (counter, shelf, in hand). Match perspective, scale, and shadows.',
+  ];
+  if (scene) {
+    parts.push('', 'Scene intent:', scene);
+  }
+  if (extra) {
+    parts.push('', 'Placement notes:', extra);
+  }
+  return clipText(parts.join('\n'), 2480);
+}
+
+/**
+ * Run Kling O1 once with num_images 1–9; download + store on R2. Does not assign
+ * variant_index (caller / worker renumbers after existing variants).
+ */
+async function generateKlingProductInsertVariants(input) {
+  const {
+    projectId,
+    sceneId,
+    baseImageUrl,
+    productImageUrl,
+    scenePrompt = '',
+    instruction = '',
+    variantCount = 3,
+  } = input;
+
+  if (!projectId || !sceneId) throw new Error('projectId and sceneId required');
+  if (!baseImageUrl || !productImageUrl) {
+    throw new Error('baseImageUrl and productImageUrl required for product insert');
+  }
+
+  if (!r2Service.isConfigured()) {
+    throw new Error(
+      'R2 storage is not configured. Set R2_ACCOUNT_ID (or R2_ENDPOINT), R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET in the server .env, then restart.'
+    );
+  }
+
+  const apiKey = apiConfig.falAI.apiKey || process.env.FAL_KEY;
+  if (!apiKey) throw new Error('FAL_AI_API_KEY not configured');
+
+  const n = Math.min(9, Math.max(1, Number(variantCount) || 3));
+  const prompt = buildKlingProductInsertPrompt(scenePrompt, instruction);
+  const body = {
+    prompt,
+    image_urls: [baseImageUrl, productImageUrl],
+    num_images: n,
+    aspect_ratio: 'auto',
+    output_format: 'png',
+  };
+
+  const t0 = Date.now();
+  const data = await postToFal(
+    'https://fal.run/fal-ai/kling-image/o1',
+    body,
+    apiKey,
+    300_000
+  );
+  const images = Array.isArray(data?.images) ? data.images : [];
+  if (images.length === 0) throw new Error('Kling O1 response had no images');
+
+  const stamp = Date.now();
+  const out = [];
+  for (let i = 0; i < images.length; i++) {
+    const url = images[i]?.url;
+    if (!url) continue;
+    const buf = await downloadImageBuffer(url);
+    const r2Key = r2Service.keys.klingInsert(projectId, sceneId, stamp, i, 'png');
+    await r2Service.upload(r2Key, buf, 'image/png');
+    out.push({
+      r2Key,
+      promptUsed: clipText(`[kling-o1] ${prompt}`, 4000),
+      width: images[i].width ?? null,
+      height: images[i].height ?? null,
+      seed: null,
+      modelUsed: 'kling-o1',
+      elapsedMs: Date.now() - t0,
+      isCustomUpload: false,
+    });
+  }
+
+  if (out.length === 0) throw new Error('Kling O1 returned no usable image URLs');
+
+  console.log(
+    `[image-bench] scene=${sceneId} kling-o1 inserts=${out.length}/${n} totalMs=${Date.now() - t0}`
+  );
+
+  return out;
+}
+
 module.exports = {
   generateSceneVariants,
+  generateKlingProductInsertVariants,
   buildFluxPrompt: buildPositivePrompt, // back-compat alias
   buildPositivePrompt,
   buildNegativePrompt,

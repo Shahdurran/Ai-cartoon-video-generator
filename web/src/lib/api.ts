@@ -510,6 +510,38 @@ export const api = {
   },
 
   /**
+   * Upload a packshot and run fal-ai/kling-image/o1 to merge it into the
+   * selected frame. Appends new variants; does not delete existing ones.
+   */
+  insertProductOnSelectedFrame: async (
+    projectId: string,
+    sceneId: string,
+    file: File,
+    opts?: { sceneImageId?: string; instruction?: string; variantCount?: number }
+  ) => {
+    const form = new FormData();
+    form.append('image', file);
+    if (opts?.sceneImageId) form.append('sceneImageId', opts.sceneImageId);
+    if (opts?.instruction) form.append('instruction', opts.instruction);
+    if (opts?.variantCount != null) form.append('variantCount', String(opts.variantCount));
+    const res = await fetch(
+      `${API_BASE}/api/projects/${projectId}/scenes/${sceneId}/insert-product-on-selected`,
+      { method: 'POST', body: form }
+    );
+    if (!res.ok) {
+      let message = `${res.status} ${res.statusText}`;
+      try {
+        const body = await res.json();
+        if (body?.error) message = body.error;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(message);
+    }
+    return res.json() as Promise<{ enqueued: true; jobId: string }>;
+  },
+
+  /**
    * Upload (or replace) the product reference image for a scene. The file
    * is stored on R2. When Higgsfield runs first, the API registers a Soul
    * custom reference from that URL before variants generate, then uses

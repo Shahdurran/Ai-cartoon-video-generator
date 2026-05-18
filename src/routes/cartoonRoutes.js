@@ -22,6 +22,7 @@
  *   PATCH  /api/projects/:id/scenes/:sceneId/select-image
  *   POST   /api/projects/:id/scenes/:sceneId/regenerate-image
  *   POST   /api/projects/:id/scenes/:sceneId/upload-image      (multipart)
+ *   POST   /api/projects/:id/scenes/:sceneId/insert-product-on-selected (multipart; appends Kling O1 variants)
  *   POST   /api/projects/:id/subtitle-font                     (multipart .ttf/.otf)
  *   POST   /api/projects/:id/scenes/:sceneId/voice
  *   POST   /api/projects/:id/scenes/:sceneId/regenerate-video
@@ -96,6 +97,11 @@ router.post(
   '/projects/:id/scenes/:sceneId/upload-image',
   projectController.upload.single('image'),
   projectController.uploadImage
+);
+router.post(
+  '/projects/:id/scenes/:sceneId/insert-product-on-selected',
+  projectController.upload.single('image'),
+  projectController.insertProductOnSelectedFrame
 );
 router.post(
   '/projects/:id/scenes/:sceneId/product-reference',

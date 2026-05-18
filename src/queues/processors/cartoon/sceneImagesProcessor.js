@@ -2,8 +2,11 @@
  * Scene images processor -- generates 3-4 Flux variants for a single scene
  * and uploads them to R2.
  *
- * Job data:
- *   { projectId, sceneId, prompt?, variantCount=3, clearExisting=false, customPrompt? }
+ * Job data (generate-variants):
+ *   { projectId, sceneId, variantCount=3, clearExisting=false, customPrompt? }
+ *
+ * Job data (insert-product):
+ *   { projectId, sceneId, baseSceneImageId, productR2Key, instruction?, variantCount=3 }
  *
  * If `customPrompt` is supplied, it replaces the scene's prompt for this
  * run (used by POST /scenes/:id/regenerate-image).
@@ -97,7 +100,118 @@ function buildCharacterConsistencyContext(scenes, currentScene) {
   };
 }
 
+async function insertProductProcessor(job) {
+  const {
+    projectId,
+    sceneId,
+    baseSceneImageId,
+    productR2Key,
+    instruction = null,
+    variantCount = 3,
+  } = job.data || {};
+
+  if (!projectId || !sceneId || !baseSceneImageId || !productR2Key) {
+    throw new Error('insert-product job requires projectId, sceneId, baseSceneImageId, productR2Key');
+  }
+
+  const scene = await sceneRepo.findById(sceneId);
+  if (!scene) throw new Error(`Scene ${sceneId} not found`);
+  const project = await projectRepo.findById(projectId);
+  if (!project) throw new Error(`Project ${projectId} not found`);
+
+  const baseRow = await sceneImageRepo.findById(baseSceneImageId);
+  if (!baseRow || baseRow.sceneId !== sceneId || baseRow.shotId) {
+    throw new Error('Base scene image not found for this scene');
+  }
+
+  await pubsub.publish(projectId, {
+    sceneId,
+    phase: 'image',
+    status: 'running',
+  });
+
+  try {
+    const baseImageUrl = await resolvePublicishUrl(baseRow.r2Key);
+    const productImageUrl = await resolvePublicishUrl(productR2Key);
+    if (!baseImageUrl) throw new Error('Could not resolve URL for the selected frame');
+    if (!productImageUrl) throw new Error('Could not resolve URL for the uploaded product image');
+
+    const rawRows = await cartoonImage.generateKlingProductInsertVariants({
+      projectId,
+      sceneId,
+      baseImageUrl,
+      productImageUrl,
+      scenePrompt: scene.imagePrompt || '',
+      instruction: instruction || '',
+      variantCount,
+    });
+
+    const existing = await sceneImageRepo.findByScene(sceneId);
+    const maxIdx = existing.reduce((m, r) => Math.max(m, Number(r.variantIndex ?? 0)), -1);
+    const variants = rawRows.map((row, i) => ({
+      ...row,
+      variantIndex: maxIdx + 1 + i,
+    }));
+
+    await sceneImageRepo.bulkCreate(sceneId, variants);
+
+    await sceneRepo.updateStatus(sceneId, 'image-ready', null, null);
+    await pubsub.publish(projectId, {
+      sceneId,
+      phase: 'image',
+      status: 'complete',
+      variantCount: variants.length,
+      insertProduct: true,
+    });
+
+    try {
+      if (r2Service.isConfigured()) await r2Service.delete(productR2Key);
+    } catch (_) {
+      /* best-effort cleanup of temp packshot */
+    }
+
+    await maybeMarkImagesReady(projectId);
+    return { sceneId, variantCount: variants.length, insertProduct: true };
+  } catch (err) {
+    const errorCode = cartoonImage.classifyImageError(err.message);
+    const maxAttempts = Math.max(1, Number(job.opts.attempts) || 1);
+    const isFinalAttempt = job.attemptsMade + 1 >= maxAttempts;
+
+    if (isFinalAttempt) {
+      await sceneRepo.updateStatus(sceneId, 'failed', err.message, errorCode);
+      await pubsub.publish(projectId, {
+        sceneId,
+        phase: 'image',
+        status: 'failed',
+        error: err.message,
+        errorCode,
+      });
+      try {
+        if (r2Service.isConfigured()) await r2Service.delete(productR2Key);
+      } catch (_) {
+        /* ignore */
+      }
+    } else {
+      await pubsub.publish(projectId, {
+        sceneId,
+        phase: 'image',
+        status: 'retrying',
+        attempt: job.attemptsMade + 1,
+        maxAttempts,
+        error: err.message,
+      });
+    }
+
+    await maybeMarkImagesReady(projectId);
+    throw err;
+  }
+}
+
 module.exports = async function sceneImagesProcessor(job) {
+  if (job.name === 'insert-product') {
+    return insertProductProcessor(job);
+  }
+
   const {
     projectId,
     sceneId,

@@ -14,7 +14,8 @@
  *
  *   PATCH  /:id/scenes/:sceneId/select-image                    -- choose a variant
  *   POST   /:id/scenes/:sceneId/regenerate-image                -- regenerate variants (optional new prompt)
- *   POST   /:id/scenes/:sceneId/upload-image                    -- multipart custom image
+ *   POST   /:id/scenes/:sceneId/upload-image                    -- multipart custom image (replaces variants)
+ *   POST   /:id/scenes/:sceneId/insert-product-on-selected       -- product packshot → Kling O1 on selected frame (appends variants)
  *   POST   /:id/scenes/:sceneId/voice                           -- (re)generate voiceover for one scene
  *   POST   /:id/scenes/:sceneId/regenerate-video                -- re-run Seedance for one scene
  *   POST   /:id/subtitles                                       -- (re)generate project-wide subtitles
@@ -751,6 +752,67 @@ async function uploadImage(req, res, next) {
     await sceneRepo.updateStatus(sceneId, 'image-ready');
 
     res.json({ sceneImage: created });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Upload a product reference image and enqueue fal-ai/kling-image/o1 to merge
+ * it into the selected (or specified) storyboard frame. New images are appended
+ * as additional variants; existing variants are kept.
+ */
+async function insertProductOnSelectedFrame(req, res, next) {
+  try {
+    const { id: projectId, sceneId } = req.params;
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const scene = await sceneRepo.findById(sceneId);
+    if (!scene || scene.projectId !== projectId) {
+      return res.status(404).json({ error: 'Scene not found' });
+    }
+
+    const sceneImageIdRaw = req.body?.sceneImageId;
+    const sceneImageId =
+      typeof sceneImageIdRaw === 'string' && sceneImageIdRaw.trim()
+        ? sceneImageIdRaw.trim()
+        : scene.selectedImageId;
+    if (!sceneImageId) {
+      return res.status(400).json({
+        error: 'Select a frame first (or pass sceneImageId) before adding a product to it.',
+      });
+    }
+
+    const baseRow = await sceneImageRepo.findById(sceneImageId);
+    if (!baseRow || baseRow.sceneId !== sceneId || baseRow.shotId) {
+      return res.status(404).json({ error: 'Scene image not found for this scene' });
+    }
+
+    if (!r2Service.isConfigured()) {
+      return res.status(503).json({ error: 'Object storage is not configured; cannot run insert' });
+    }
+
+    const instruction =
+      typeof req.body?.instruction === 'string' ? req.body.instruction.trim().slice(0, 2000) : '';
+    const vc = Number(req.body?.variantCount);
+    const variantCount = Number.isFinite(vc) ? Math.min(9, Math.max(1, vc)) : 3;
+
+    const ext = imageExtFromMime(file.mimetype);
+    const tempId = randomUUID();
+    const productKey = r2Service.keys.insertProductTemp(projectId, sceneId, tempId, ext);
+    await r2Service.upload(productKey, file.buffer, file.mimetype || 'application/octet-stream');
+
+    const job = await queues.sceneImages.add('insert-product', {
+      projectId,
+      sceneId,
+      baseSceneImageId: sceneImageId,
+      productR2Key: productKey,
+      instruction: instruction || null,
+      variantCount,
+    });
+
+    res.json({ enqueued: true, jobId: job.id });
   } catch (err) {
     next(err);
   }
@@ -1860,7 +1922,7 @@ module.exports = {
   create, list, get, patch, remove,
   replaceScenes, regenerateScript, approveScript,
   patchScene,
-  selectImage, regenerateImage, uploadImage, uploadSubtitleFont,
+  selectImage, regenerateImage, uploadImage, insertProductOnSelectedFrame, uploadSubtitleFont,
   uploadProductReference, deleteProductReference, applyProductReferenceToAll,
   generateSceneVoice,
   regenerateSceneVideo,

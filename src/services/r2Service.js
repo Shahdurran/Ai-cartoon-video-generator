@@ -234,6 +234,12 @@ const keys = {
     `projects/${projectId}/scenes/${sceneId}/upload-${Date.now()}-${filename}`,
   productReference: (projectId, sceneId, ext = 'png') =>
     `projects/${projectId}/scenes/${sceneId}/product-reference.${ext}`,
+  /** One-off packshot uploaded for Kling O1 insert; deleted after the job. */
+  insertProductTemp: (projectId, sceneId, id, ext = 'png') =>
+    `projects/${projectId}/scenes/${sceneId}/insert-product-src-${id}.${ext}`,
+  /** Outputs from fal-ai/kling-image/o1 append flows (distinct keys so we never collide). */
+  klingInsert: (projectId, sceneId, stamp, i, ext = 'png') =>
+    `projects/${projectId}/scenes/${sceneId}/kling-insert-${stamp}-${i}.${ext}`,
   /** Step-1 project-wide reference image used by Claude when generating
    *  the scene/imagePrompts. `id` is the row UUID so we never collide. */
   visualReference: (projectId, id, ext = 'png') =>

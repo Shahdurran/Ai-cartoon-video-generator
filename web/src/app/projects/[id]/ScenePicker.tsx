@@ -61,7 +61,8 @@ export function ScenePicker({
   const [showFailureDetails, setShowFailureDetails] = useState(false);
   const [prompt, setPrompt] = useState(scene.imagePrompt);
   const [busy, setBusy] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
+  const replaceFileInput = useRef<HTMLInputElement>(null);
+  const insertProductInput = useRef<HTMLInputElement>(null);
 
   async function select(variantId: string) {
     await api.selectSceneImage(projectId, scene.id, variantId);
@@ -95,7 +96,7 @@ export function ScenePicker({
     }
   }
 
-  async function uploadFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function replaceAllWithUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (busy) return;
@@ -105,7 +106,25 @@ export function ScenePicker({
       await onChange();
     } finally {
       setBusy(false);
-      if (fileInput.current) fileInput.current.value = '';
+      if (replaceFileInput.current) replaceFileInput.current.value = '';
+    }
+  }
+
+  async function insertProductOnSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (busy) return;
+    if (!scene.selectedImageId) return;
+    setBusy(true);
+    try {
+      await api.insertProductOnSelectedFrame(projectId, scene.id, file, {
+        sceneImageId: scene.selectedImageId,
+        variantCount: 3,
+      });
+      await onChange();
+    } finally {
+      setBusy(false);
+      if (insertProductInput.current) insertProductInput.current.value = '';
     }
   }
 
@@ -189,11 +208,11 @@ export function ScenePicker({
             <label className="btn-ghost !px-3 !py-1.5 !text-xs cursor-pointer">
               Upload custom image
               <input
-                ref={fileInput}
+                ref={replaceFileInput}
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={uploadFile}
+                onChange={replaceAllWithUpload}
                 disabled={busy}
               />
             </label>
@@ -284,14 +303,34 @@ export function ScenePicker({
           >
             {showPromptTweak ? 'Cancel' : 'Regenerate with new prompt'}
           </button>
-          <label className="btn-ghost !px-3 !py-1.5 !text-xs cursor-pointer">
-            Upload custom image
+          <label
+            className={`btn-ghost !px-3 !py-1.5 !text-xs cursor-pointer ${
+              !scene.selectedImageId ? 'opacity-40 cursor-not-allowed' : ''
+            }`}
+            title={
+              scene.selectedImageId
+                ? 'Uses fal Kling O1 to add your packshot into the selected frame; keeps existing variants.'
+                : 'Select a thumbnail first.'
+            }
+          >
+            Add product to selected
             <input
-              ref={fileInput}
+              ref={insertProductInput}
               type="file"
               accept="image/*"
               className="hidden"
-              onChange={uploadFile}
+              onChange={insertProductOnSelected}
+              disabled={busy || !scene.selectedImageId}
+            />
+          </label>
+          <label className="btn-ghost !px-3 !py-1.5 !text-xs cursor-pointer">
+            Replace all with upload
+            <input
+              ref={replaceFileInput}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={replaceAllWithUpload}
               disabled={busy}
             />
           </label>
@@ -311,7 +350,7 @@ export function ScenePicker({
               This scene has a <span className="text-white/90">product reference</span>. With Higgsfield, the API registers a{' '}
               <span className="text-white/90">Soul ID</span> from that image for stronger conditioning than{' '}
               <code className="text-[10px] text-white/75">image_url</code> alone — empty hands can still happen; spell out grip, label, and camera angle, retry variants, try{' '}
-              <span className="text-white/90">fal.ai only</span> in image settings, or <span className="text-white/90">Upload custom image</span> for a guaranteed frame.
+              <span className="text-white/90">fal.ai only</span> in image settings, use <span className="text-white/90">Add product to selected</span> to merge a packshot into the frame you picked, or <span className="text-white/90">Replace all with upload</span> for a single final image.
             </p>
           )}
           <textarea

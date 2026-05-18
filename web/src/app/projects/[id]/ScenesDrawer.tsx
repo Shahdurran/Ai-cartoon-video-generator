@@ -196,12 +196,33 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
     }
   }
 
+  async function insertProductOnFrame(scene: Scene, file: File) {
+    if (!scene.selectedImageId) {
+      flashToast('Select a frame in the thumbnails first.');
+      return;
+    }
+    setSceneBusy(scene.id, 'insertProduct');
+    try {
+      await api.insertProductOnSelectedFrame(projectId, scene.id, file, {
+        sceneImageId: scene.selectedImageId,
+        variantCount: 3,
+      });
+      flashToast(`Scene ${scene.sceneIndex + 1}: inserting product (Kling O1)…`);
+      await refresh();
+      notifyProjectWorkspaceMutated(projectId);
+    } catch (err: any) {
+      flashToast(err?.message || 'Product insert failed');
+    } finally {
+      setSceneBusy(scene.id, null);
+    }
+  }
+
   async function uploadImage(scene: Scene, file: File) {
     setSceneBusy(scene.id, 'upload');
     try {
       await api.uploadSceneImage(projectId, scene.id, file);
       await refresh();
-      flashToast(`Scene ${scene.sceneIndex + 1} image replaced`);
+      flashToast(`Scene ${scene.sceneIndex + 1}: image replaced`);
     } catch (err: any) {
       flashToast(err?.message || 'Upload failed');
     } finally {
@@ -349,6 +370,7 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
                   onSave={() => saveScene(scene)}
                   onRegenerate={() => regenerateScene(scene)}
                   onUploadImage={(f) => uploadImage(scene, f)}
+                  onInsertProductOnFrame={(f) => insertProductOnFrame(scene, f)}
                   onUploadProductRef={(f) => uploadProductRef(scene, f)}
                   onClearProductRef={() => clearProductRef(scene)}
                   onApplyProductRefAll={() => applyProductRefAll(scene)}
@@ -375,6 +397,7 @@ function SceneRow({
   onSave,
   onRegenerate,
   onUploadImage,
+  onInsertProductOnFrame,
   onUploadProductRef,
   onClearProductRef,
   onApplyProductRefAll,
@@ -387,6 +410,7 @@ function SceneRow({
   onSave: () => void;
   onRegenerate: () => void;
   onUploadImage: (f: File) => void;
+  onInsertProductOnFrame: (f: File) => void;
   onUploadProductRef: (f: File) => void;
   onClearProductRef: () => void;
   onApplyProductRefAll: () => void;
@@ -450,12 +474,29 @@ function SceneRow({
               </div>
             )}
           </div>
-          <FilePickerButton
-            label={busyLabel === 'upload' ? 'Uploading…' : 'Upload image'}
-            disabled={locked || !!busyLabel}
-            onPick={onUploadImage}
-            accept="image/png,image/jpeg,image/webp"
-          />
+          <div className="flex flex-col gap-2">
+            <FilePickerButton
+              label={
+                busyLabel === 'insertProduct'
+                  ? 'Inserting product…'
+                  : 'Add product to selected'
+              }
+              disabled={
+                locked ||
+                !!busyLabel ||
+                !scene.selectedImageId ||
+                (scene.imageVariants?.length || 0) === 0
+              }
+              onPick={onInsertProductOnFrame}
+              accept="image/png,image/jpeg,image/webp"
+            />
+            <FilePickerButton
+              label={busyLabel === 'upload' ? 'Uploading…' : 'Replace with upload'}
+              disabled={locked || !!busyLabel}
+              onPick={onUploadImage}
+              accept="image/png,image/jpeg,image/webp"
+            />
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -619,6 +660,7 @@ function FilePickerButton({
         type="file"
         accept={accept}
         className="hidden"
+        disabled={disabled}
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) onPick(f);

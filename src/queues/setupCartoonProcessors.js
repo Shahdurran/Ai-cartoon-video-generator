@@ -26,6 +26,7 @@ async function setupCartoonProcessors() {
 
   queues.sceneScript.process('generate', 2, sceneScriptProcessor);
   queues.sceneImages.process('generate-variants', 2, sceneImagesProcessor);
+  queues.sceneImages.process('insert-product', 2, sceneImagesProcessor);
   queues.sceneVoice.process('generate', 3, sceneVoiceProcessor);
   queues.projectSubtitles.process('generate', 1, projectSubtitlesProcessor);
 
