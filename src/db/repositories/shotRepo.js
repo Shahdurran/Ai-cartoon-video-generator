@@ -187,6 +187,18 @@ async function setVideoKey(shotId, videoKey) {
   );
 }
 
+async function clearShotVideo(shotId) {
+  await query(
+    `UPDATE scene_shots
+     SET video_key = NULL,
+         status = 'image-ready',
+         error_message = NULL,
+         error_code = NULL
+     WHERE id = $1`,
+    [shotId]
+  );
+}
+
 /**
  * Patch a shot's editable fields (image_prompt, role, duration). Used by
  * the shots-review UI to tweak prompts in place. Pass null/undefined to
@@ -232,6 +244,7 @@ module.exports = {
   updateSelectedImage,
   setFalRequestId,
   setVideoKey,
+  clearShotVideo,
   patchFields,
   USE_APPROVED_SCENE_IMAGE_MARKER,
   isLockedShot,

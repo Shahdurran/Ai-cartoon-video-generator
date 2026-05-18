@@ -731,7 +731,7 @@ async function generateKlingProductInsertVariants(input) {
     productImageUrl,
     scenePrompt = '',
     instruction = '',
-    variantCount = 3,
+    variantCount = 1,
   } = input;
 
   if (!projectId || !sceneId) throw new Error('projectId and sceneId required');
@@ -748,7 +748,7 @@ async function generateKlingProductInsertVariants(input) {
   const apiKey = apiConfig.falAI.apiKey || process.env.FAL_KEY;
   if (!apiKey) throw new Error('FAL_AI_API_KEY not configured');
 
-  const n = Math.min(9, Math.max(1, Number(variantCount) || 3));
+  const n = Math.min(9, Math.max(1, Number(variantCount) || 1));
   const prompt = buildKlingProductInsertPrompt(scenePrompt, instruction);
   const body = {
     prompt,

@@ -6,7 +6,7 @@
  *   { projectId, sceneId, variantCount=3, clearExisting=false, customPrompt? }
  *
  * Job data (insert-product):
- *   { projectId, sceneId, baseSceneImageId, productR2Key, instruction?, variantCount=3 }
+ *   { projectId, sceneId, baseSceneImageId, productR2Key, instruction?, variantCount=1 }
  *
  * If `customPrompt` is supplied, it replaces the scene's prompt for this
  * run (used by POST /scenes/:id/regenerate-image).
@@ -107,7 +107,7 @@ async function insertProductProcessor(job) {
     baseSceneImageId,
     productR2Key,
     instruction = null,
-    variantCount = 3,
+    variantCount = 1,
   } = job.data || {};
 
   if (!projectId || !sceneId || !baseSceneImageId || !productR2Key) {

@@ -149,6 +149,19 @@ async function setVideoKey(sceneId, videoKey) {
   );
 }
 
+/** Drop Seedance output for this scene (new still invalidates the clip). */
+async function clearSceneVideo(sceneId) {
+  await query(
+    `UPDATE scenes
+     SET video_key = NULL,
+         status = 'image-ready',
+         error_message = NULL,
+         error_code = NULL
+     WHERE id = $1`,
+    [sceneId]
+  );
+}
+
 async function setVoiceKey(sceneId, voiceKey) {
   await query(
     `UPDATE scenes SET voice_key = $2 WHERE id = $1`,
@@ -264,6 +277,7 @@ module.exports = {
   updateStatus,
   setFalRequestId,
   setVideoKey,
+  clearSceneVideo,
   setVoiceKey,
   patchFields,
   setProductReferenceKey,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, type Scene, type SceneErrorCode } from '@/lib/api';
 import {
   isSceneImageGenerationFailed,
@@ -61,8 +61,50 @@ export function ScenePicker({
   const [showFailureDetails, setShowFailureDetails] = useState(false);
   const [prompt, setPrompt] = useState(scene.imagePrompt);
   const [busy, setBusy] = useState(false);
+  const [productInsertPending, setProductInsertPending] = useState(false);
   const replaceFileInput = useRef<HTMLInputElement>(null);
   const insertProductInput = useRef<HTMLInputElement>(null);
+  const productInsertBaselineRef = useRef<number | null>(null);
+  const productInsertErrorBaselineRef = useRef<string>('');
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    if (!productInsertPending || productInsertBaselineRef.current === null) return;
+    const base = productInsertBaselineRef.current;
+    const errBase = productInsertErrorBaselineRef.current;
+
+    if (scene.imageVariants.length > base) {
+      setProductInsertPending(false);
+      productInsertBaselineRef.current = null;
+      return;
+    }
+    const errNow = scene.errorMessage || '';
+    if (errNow !== errBase) {
+      setProductInsertPending(false);
+      productInsertBaselineRef.current = null;
+    }
+  }, [
+    scene.id,
+    scene.imageVariants.length,
+    scene.errorMessage,
+    productInsertPending,
+  ]);
+
+  useEffect(() => {
+    if (!productInsertPending) return;
+    const started = Date.now();
+    const iv = setInterval(() => {
+      void Promise.resolve(onChangeRef.current?.());
+      if (Date.now() - started > 240_000) {
+        setProductInsertPending(false);
+        productInsertBaselineRef.current = null;
+      }
+    }, 1500);
+    return () => clearInterval(iv);
+  }, [productInsertPending]);
+
+  const working = busy || productInsertPending;
 
   async function select(variantId: string) {
     await api.selectSceneImage(projectId, scene.id, variantId);
@@ -70,7 +112,7 @@ export function ScenePicker({
   }
 
   async function regenerate() {
-    if (busy) return;
+    if (working) return;
     setBusy(true);
     try {
       await api.regenerateSceneImage(projectId, scene.id, {
@@ -84,7 +126,7 @@ export function ScenePicker({
   }
 
   async function retryFailed() {
-    if (busy) return;
+    if (working) return;
     setBusy(true);
     try {
       await api.regenerateSceneImage(projectId, scene.id, {
@@ -99,7 +141,7 @@ export function ScenePicker({
   async function replaceAllWithUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (busy) return;
+    if (working) return;
     setBusy(true);
     try {
       await api.uploadSceneImage(projectId, scene.id, file);
@@ -113,15 +155,21 @@ export function ScenePicker({
   async function insertProductOnSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (busy) return;
+    if (working) return;
     if (!scene.selectedImageId) return;
+    productInsertBaselineRef.current = scene.imageVariants.length;
+    productInsertErrorBaselineRef.current = scene.errorMessage || '';
+    setProductInsertPending(true);
     setBusy(true);
     try {
       await api.insertProductOnSelectedFrame(projectId, scene.id, file, {
         sceneImageId: scene.selectedImageId,
-        variantCount: 3,
+        variantCount: 1,
       });
       await onChange();
+    } catch {
+      setProductInsertPending(false);
+      productInsertBaselineRef.current = null;
     } finally {
       setBusy(false);
       if (insertProductInput.current) insertProductInput.current.value = '';
@@ -132,6 +180,7 @@ export function ScenePicker({
   const videoStageFailed = isSceneVideoStageFailed(scene);
   const isGenerating =
     !imageGenFailed && scene.imageVariants.length === 0;
+  const isProductInsertRunning = productInsertPending;
   const isUnpicked =
     !imageGenFailed && scene.imageVariants.length > 0 && !scene.selectedImageId;
 
@@ -155,7 +204,11 @@ export function ScenePicker({
           </div>
           <div className="text-[11px] text-ink-200/70 mt-1.5">
             {scene.durationSeconds}s ·{' '}
-            {videoStageFailed ? 'failed after images' : scene.status}
+            {isProductInsertRunning
+              ? 'merging product…'
+              : videoStageFailed
+                ? 'failed after images'
+                : scene.status}
           </div>
         </div>
         {isUnpicked && (
@@ -199,11 +252,11 @@ export function ScenePicker({
           <div className="flex flex-wrap gap-2">
             <button
               onClick={retryFailed}
-              disabled={busy}
-              aria-busy={busy}
+              disabled={working}
+              aria-busy={working}
               className="btn-primary !px-3 !py-1.5 !text-xs disabled:opacity-70 disabled:cursor-wait"
             >
-              {busy ? 'Processing…' : 'Retry generation'}
+              {working ? 'Processing…' : 'Retry generation'}
             </button>
             <label className="btn-ghost !px-3 !py-1.5 !text-xs cursor-pointer">
               Upload custom image
@@ -213,7 +266,7 @@ export function ScenePicker({
                 accept="image/*"
                 className="hidden"
                 onChange={replaceAllWithUpload}
-                disabled={busy}
+                disabled={working}
               />
             </label>
             {scene.errorMessage && (
@@ -253,6 +306,8 @@ export function ScenePicker({
             return (
               <button
                 key={variant.id}
+                type="button"
+                disabled={working}
                 onClick={() => select(variant.id)}
                 className={`relative aspect-video rounded-xl overflow-hidden border-2 transition ${
                   selected
@@ -294,11 +349,26 @@ export function ScenePicker({
         </div>
       )}
 
+      {!imageGenFailed && isProductInsertRunning && (
+        <div className="mt-3 rounded-xl border border-dashed border-brand-400/25 bg-brand-500/[0.06] px-3 py-2.5">
+          <div className="flex items-center gap-2 text-[12px] text-ink-50">
+            <span
+              className="h-2.5 w-2.5 rounded-full shrink-0 animate-glow"
+              style={{
+                backgroundImage:
+                  'linear-gradient(135deg, #FFA846 0%, #FF4689 100%)',
+              }}
+            />
+            Merging your product into the selected frame — this usually takes under a minute.
+          </div>
+        </div>
+      )}
+
       {!imageGenFailed && (
         <div className="mt-4 flex items-center gap-3 flex-wrap">
           <button
             onClick={() => setShowPromptTweak((v) => !v)}
-            disabled={busy}
+            disabled={working}
             className="btn-ghost !px-3 !py-1.5 !text-xs"
           >
             {showPromptTweak ? 'Cancel' : 'Regenerate with new prompt'}
@@ -320,7 +390,7 @@ export function ScenePicker({
               accept="image/*"
               className="hidden"
               onChange={insertProductOnSelected}
-              disabled={busy || !scene.selectedImageId}
+              disabled={working || !scene.selectedImageId}
             />
           </label>
           <label className="btn-ghost !px-3 !py-1.5 !text-xs cursor-pointer">
@@ -331,13 +401,15 @@ export function ScenePicker({
               accept="image/*"
               className="hidden"
               onChange={replaceAllWithUpload}
-              disabled={busy}
+              disabled={working}
             />
           </label>
-          {busy && (
+          {working && (
             <span className="text-[11px] text-ink-200/70 flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-brand-400 animate-glow" />
-              Processing…
+              {productInsertPending
+                ? 'Merging product…'
+                : 'Processing…'}
             </span>
           )}
         </div>
@@ -361,11 +433,11 @@ export function ScenePicker({
           />
           <button
             onClick={regenerate}
-            disabled={busy}
-            aria-busy={busy}
+            disabled={working}
+            aria-busy={working}
             className="btn-primary !px-3 !py-1.5 !text-xs disabled:opacity-70 disabled:cursor-wait"
           >
-            {busy ? 'Processing…' : 'Generate new variants'}
+            {working ? 'Processing…' : 'Generate new variants'}
           </button>
         </div>
       )}

@@ -38,6 +38,13 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
   const [toast, setToast] = useState<string | null>(null);
   const [portalReady, setPortalReady] = useState(false);
   const lastSseRefetchAt = useRef(0);
+  /** Tracks Kling "add product" jobs until the scene gains a variant or errors. */
+  const insertProductWaitRef = useRef<
+    Record<string, { base: number; err: string; started: number }>
+  >({});
+  const [insertProductPending, setInsertProductPending] = useState<
+    Record<string, boolean>
+  >({});
 
   // Render into document.body so fixed z-index stacks above the app shell
   // header (sticky z-30 + backdrop-blur). Inside <main> the drawer was
@@ -124,6 +131,54 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
     };
   }, [open, projectId, refresh]);
 
+  useEffect(() => {
+    if (!project) return;
+    setInsertProductPending((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const sid of Object.keys(next)) {
+        if (!next[sid]) continue;
+        const meta = insertProductWaitRef.current[sid];
+        if (!meta) {
+          next[sid] = false;
+          changed = true;
+          continue;
+        }
+        const s = project.scenes.find((sc) => sc.id === sid);
+        if (!s) {
+          next[sid] = false;
+          changed = true;
+          delete insertProductWaitRef.current[sid];
+          continue;
+        }
+        if (s.imageVariants.length > meta.base) {
+          next[sid] = false;
+          changed = true;
+          delete insertProductWaitRef.current[sid];
+        } else if ((s.errorMessage || '') !== meta.err) {
+          next[sid] = false;
+          changed = true;
+          delete insertProductWaitRef.current[sid];
+        } else if (Date.now() - meta.started > 240_000) {
+          next[sid] = false;
+          changed = true;
+          delete insertProductWaitRef.current[sid];
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [project]);
+
+  useEffect(() => {
+    if (!open) return;
+    const any = Object.values(insertProductPending).some(Boolean);
+    if (!any) return;
+    const iv = setInterval(() => {
+      void refresh();
+    }, 1500);
+    return () => clearInterval(iv);
+  }, [open, insertProductPending, refresh]);
+
   function setEdit(sceneId: string, patch: Partial<SceneEdits>) {
     setEdits((prev) => ({
       ...prev,
@@ -201,19 +256,25 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
       flashToast('Select a frame in the thumbnails first.');
       return;
     }
-    setSceneBusy(scene.id, 'insertProduct');
+    if (insertProductWaitRef.current[scene.id]) return;
+    insertProductWaitRef.current[scene.id] = {
+      base: scene.imageVariants.length,
+      err: scene.errorMessage || '',
+      started: Date.now(),
+    };
+    setInsertProductPending((p) => ({ ...p, [scene.id]: true }));
     try {
       await api.insertProductOnSelectedFrame(projectId, scene.id, file, {
         sceneImageId: scene.selectedImageId,
-        variantCount: 3,
+        variantCount: 1,
       });
-      flashToast(`Scene ${scene.sceneIndex + 1}: inserting product (Kling O1)…`);
+      flashToast(`Scene ${scene.sceneIndex + 1}: merging product…`);
       await refresh();
       notifyProjectWorkspaceMutated(projectId);
     } catch (err: any) {
+      delete insertProductWaitRef.current[scene.id];
+      setInsertProductPending((p) => ({ ...p, [scene.id]: false }));
       flashToast(err?.message || 'Product insert failed');
-    } finally {
-      setSceneBusy(scene.id, null);
     }
   }
 
@@ -364,7 +425,10 @@ export function ScenesDrawer({ projectId, open, onClose }: Props) {
                   key={scene.id}
                   scene={scene}
                   edits={edits[scene.id]}
-                  busyLabel={busy[scene.id] || null}
+                  busyLabel={
+                    busy[scene.id] ||
+                    (insertProductPending[scene.id] ? 'insertProduct' : null)
+                  }
                   locked={sceneEditingLocked}
                   onEdit={(patch) => setEdit(scene.id, patch)}
                   onSave={() => saveScene(scene)}

@@ -39,6 +39,7 @@ const { randomUUID } = require('crypto');
 
 const r2Service = require('../services/r2Service');
 const pubsub = require('../services/pubsubService');
+const stillChangeInvalidation = require('../services/stillChangeInvalidation');
 const { queues } = require('../queues/cartoonQueues');
 
 const memoryUpload = multer({
@@ -478,10 +479,23 @@ async function selectImage(req, res, next) {
     const { sceneImageId } = req.body;
     if (!sceneImageId) return res.status(400).json({ error: 'sceneImageId required' });
 
+    const sceneBefore = await sceneRepo.findById(sceneId);
+    if (!sceneBefore || sceneBefore.projectId !== projectId) {
+      return res.status(404).json({ error: 'Scene not found' });
+    }
+
     const img = await sceneImageRepo.findById(sceneImageId);
     if (!img || img.sceneId !== sceneId) {
       return res.status(404).json({ error: 'Scene image not found for this scene' });
     }
+
+    if (
+      !sceneBefore.multiShotEnabled &&
+      sceneBefore.selectedImageId !== sceneImageId
+    ) {
+      await stillChangeInvalidation.afterSingleShotSceneStillChanged(projectId, sceneId);
+    }
+
     const scene = await sceneRepo.updateSelectedImage(sceneId, sceneImageId);
     res.json({ scene });
   } catch (err) {
@@ -497,6 +511,10 @@ async function regenerateImage(req, res, next) {
     const scene = await sceneRepo.findById(sceneId);
     if (!scene || scene.projectId !== projectId) {
       return res.status(404).json({ error: 'Scene not found' });
+    }
+
+    if (!scene.multiShotEnabled) {
+      await stillChangeInvalidation.afterSingleShotSceneStillChanged(projectId, sceneId);
     }
 
     const job = await queues.sceneImages.add('generate-variants', {
@@ -736,6 +754,12 @@ async function uploadImage(req, res, next) {
     const filename = file.originalname.replace(/[^\w.-]+/g, '_');
     const r2Key = r2Service.keys.customUpload(projectId, sceneId, filename);
 
+    if (!scene.multiShotEnabled) {
+      await stillChangeInvalidation.afterSingleShotSceneStillChanged(projectId, sceneId);
+    } else {
+      await stillChangeInvalidation.afterMultiShotSceneLegacyVideoOnly(projectId, sceneId);
+    }
+
     if (r2Service.isConfigured()) {
       await r2Service.upload(r2Key, file.buffer, file.mimetype || 'application/octet-stream');
     }
@@ -796,7 +820,7 @@ async function insertProductOnSelectedFrame(req, res, next) {
     const instruction =
       typeof req.body?.instruction === 'string' ? req.body.instruction.trim().slice(0, 2000) : '';
     const vc = Number(req.body?.variantCount);
-    const variantCount = Number.isFinite(vc) ? Math.min(9, Math.max(1, vc)) : 3;
+    const variantCount = Number.isFinite(vc) ? Math.min(9, Math.max(1, vc)) : 1;
 
     const ext = imageExtFromMime(file.mimetype);
     const tempId = randomUUID();
@@ -1649,10 +1673,24 @@ async function selectShotImage(req, res, next) {
     const { sceneImageId } = req.body;
     if (!sceneImageId) return res.status(400).json({ error: 'sceneImageId required' });
 
+    const shotBefore = await shotRepo.findById(shotId);
+    if (!shotBefore || shotBefore.sceneId !== sceneId) {
+      return res.status(404).json({ error: 'Shot not found' });
+    }
+    const scene = await sceneRepo.findById(sceneId);
+    if (!scene || scene.projectId !== projectId) {
+      return res.status(404).json({ error: 'Scene not found' });
+    }
+
     const img = await sceneImageRepo.findById(sceneImageId);
     if (!img || img.shotId !== shotId) {
       return res.status(404).json({ error: 'Image not found for this shot' });
     }
+
+    if (shotBefore.selectedImageId !== sceneImageId) {
+      await stillChangeInvalidation.afterShotStillChanged(projectId, shotId);
+    }
+
     const shot = await shotRepo.updateSelectedImage(shotId, sceneImageId);
     res.json({ shot });
   } catch (err) {
@@ -1674,10 +1712,16 @@ async function regenerateShotImage(req, res, next) {
     if (!shot || shot.sceneId !== sceneId) {
       return res.status(404).json({ error: 'Shot not found' });
     }
+    const scene = await sceneRepo.findById(sceneId);
+    if (!scene || scene.projectId !== projectId) {
+      return res.status(404).json({ error: 'Scene not found' });
+    }
 
     if (typeof prompt === 'string' && prompt.trim() && prompt.trim() !== shot.imagePrompt) {
       await shotRepo.patchFields(shotId, { imagePrompt: prompt.trim() });
     }
+
+    await stillChangeInvalidation.afterShotStillChanged(projectId, shotId);
 
     const job = await queues.shotImages.add('generate-variants', {
       projectId,
