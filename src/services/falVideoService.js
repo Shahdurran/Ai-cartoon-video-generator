@@ -156,6 +156,8 @@ function buildVideoInput({
 
   // Seedance 1.0 Pro — fal-ai/bytedance/seedance/v1/pro/image-to-video
   // duration must be string enum "2".."12" (not a number) or Fal returns 422.
+  const aspect_ratio = normalizeSeedance20AspectRatio(s20.aspect_ratio);
+
   if (isSeedanceV1ProImageToVideo(modelId)) {
     const secs = Math.min(12, Math.max(2, Math.round(Number(sceneDurationSeconds) || 5)));
     return {
@@ -163,7 +165,7 @@ function buildVideoInput({
       image_url: imageUrl,
       duration: String(secs),
       resolution: '1080p',
-      aspect_ratio: 'auto',
+      aspect_ratio,
       enable_safety_checker: true,
       camera_fixed: false,
     };
@@ -176,7 +178,7 @@ function buildVideoInput({
     prompt,
     duration: String(secs),
     resolution: '1080p',
-    aspect_ratio: 'auto',
+    aspect_ratio,
   };
 }
 

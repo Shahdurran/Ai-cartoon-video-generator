@@ -70,6 +70,16 @@ const SD20_DUR = [
 ] as const;
 const SD20_AR = ['auto', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'] as const;
 
+const VIDEO_ASPECT_LABELS: Record<(typeof SD20_AR)[number], string> = {
+  auto: 'Auto — match input image',
+  '21:9': 'Ultrawide (21:9)',
+  '16:9': 'Landscape widescreen (16:9)',
+  '4:3': 'Classic TV (4:3)',
+  '1:1': 'Square (1:1)',
+  '3:4': 'Portrait (3:4)',
+  '9:16': 'Vertical / phone (9:16)',
+};
+
 export function defaultImageSettings(): ImageModelSettings {
   return {
     imageProvider: 'higgsfield',
@@ -547,8 +557,8 @@ export function VideoModelPanel({
         </span>
       </div>
       <p className="text-[11px] text-ink-200/70 mb-4 leading-relaxed">
-        Default is Seedance 1.0 Pro; switch to 2.0 for newer controls (resolution,
-        duration string, aspect ratio, audio).{' '}
+        Default is Seedance 1.0 Pro; switch to 2.0 for resolution, duration strings,
+        and optional audio. Output aspect ratio applies to both models.{' '}
         <a
           className="text-brand-300 hover:underline"
           href="https://fal.ai/models/fal-ai/bytedance/seedance/v1/pro/image-to-video"
@@ -581,6 +591,26 @@ export function VideoModelPanel({
           </option>
         ))}
       </select>
+
+      <label className="label mt-3 block">Output aspect ratio</label>
+      <select
+        className="field mt-1.5"
+        value={vid.seedance20?.aspect_ratio || 'auto'}
+        disabled={disabled}
+        onChange={(e) => patchSd({ aspect_ratio: e.target.value })}
+      >
+        {SD20_AR.map((a) => (
+          <option key={a} value={a}>
+            {VIDEO_ASPECT_LABELS[a]}
+          </option>
+        ))}
+      </select>
+      <p className="text-[10px] text-ink-200/60 mt-1.5 leading-relaxed">
+        Use <strong className="font-normal text-ink-100/80">16:9</strong> for landscape
+        and <strong className="font-normal text-ink-100/80">9:16</strong> for vertical
+        (Reels, TikTok). Auto follows your scene still; pick an explicit ratio if the
+        clip shape looks wrong.
+      </p>
 
       {isSeedance20 ? (
         <>
@@ -616,19 +646,6 @@ export function VideoModelPanel({
               </select>
             </label>
           </div>
-          <label className="label mt-3 block">Aspect ratio</label>
-          <select
-            className="field mt-1.5"
-            value={vid.seedance20?.aspect_ratio || 'auto'}
-            disabled={disabled}
-            onChange={(e) => patchSd({ aspect_ratio: e.target.value })}
-          >
-            {SD20_AR.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
           <label className="flex items-center gap-2 mt-3">
             <input
               type="checkbox"
@@ -669,10 +686,9 @@ export function VideoModelPanel({
         </>
       ) : (
         <p className="mt-3 text-[11px] text-ink-200/70">
-          Seedance 1.0 Pro uses each scene&apos;s duration (mapped to Fal&apos;s
-          2–12s), 1080p output, and standard aspect/safety defaults. Pick Seedance 2.0
-          above for resolution, <code className="text-[10px] text-white/80">auto</code>
-          / fixed-second duration strings, aspect ratio, and optional audio.
+          Seedance 1.0 Pro uses each scene&apos;s duration (mapped to Fal&apos;s 2–12s)
+          and 1080p output. Pick Seedance 2.0 above for resolution, duration strings, and
+          optional audio.
         </p>
       )}
 
